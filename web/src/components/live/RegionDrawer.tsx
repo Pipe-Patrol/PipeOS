@@ -119,7 +119,7 @@ export function RegionDrawer({ onCommit, onCancel }: RegionDrawerProps) {
       {/* Dimmed so it is obvious the feed is in a mode, not just being watched. */}
       <div className="pointer-events-none absolute inset-0 bg-ink-1000/35" />
 
-      <p className="pointer-events-none absolute top-6 left-1/2 -translate-x-1/2 rounded-panel border border-ink-700 bg-ink-1000/85 px-3 py-1.5 text-[12px] tracking-[0.1em] text-ink-100 uppercase">
+      <p className="pointer-events-none absolute top-6 left-1/2 -translate-x-1/2 rounded-panel border border-ink-700 bg-ink-1000/85 px-3 py-1.5 text-[12px] tracking-[0.1em] text-ink-100">
         Drag a box around the defect · Esc to cancel
       </p>
 
