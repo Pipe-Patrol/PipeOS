@@ -66,7 +66,23 @@ import time
 
 log = logging.getLogger(__name__)
 
-RESOLUTION = (640, 480)
+# 720p, not VGA, and not 1080p either.
+#
+# The console draws the feed full-bleed, so a 640x480 stream was being blown up
+# about 1.9x on a laptop screen -- every sensor pixel painted as roughly 2x2,
+# which is why the picture looked soft while the small still in the defect panel,
+# which *downscales* the same frame, looked sharp. The stream was never the
+# problem; the magnification was.
+#
+# 1280x720 lands about 1:1 on a laptop-width video area, so the upscaling stops.
+# 1080p is available and costs the same frame rate, but at this window size it
+# would be downscaled again on arrival -- 19 Mbit/s and 3x the recording on the
+# card to deliver detail the screen throws away. Measured on this robot:
+#
+#     640x480    21 fps    13 KB/frame    2.3 Mbit/s
+#     1280x720   15 fps    48 KB/frame    5.9 Mbit/s
+#     1920x1080  15 fps   156 KB/frame   19.1 Mbit/s
+RESOLUTION = (1280, 720)
 JPEG_QUALITY = 75
 FRAME_WAIT_TIMEOUT_S = 5.0
 USB_MAX_DEVICE_INDEX = 9  # scan /dev/video0 .. /dev/video9
