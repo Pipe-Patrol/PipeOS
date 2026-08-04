@@ -15,7 +15,7 @@ import {
   TuneIcon,
 } from '@/components/primitives/icons'
 import type { RobotClient } from '@/robot/client'
-import type { Run, Telemetry } from '@/robot/types'
+import type { DefectRegion, Run, Telemetry } from '@/robot/types'
 
 export type PanelId = 'lights' | 'tuning' | 'gallery' | 'defects'
 
@@ -31,6 +31,17 @@ interface ToolPaletteProps {
   onToggleRecording: () => void
   onRunChanged: () => void
   onShowShortcuts: () => void
+  /**
+   * True while the operator is drawing a defect box on the feed. Suppresses the
+   * letter shortcuts (`d` would close the panel out from under them) and keeps
+   * the defect panel from treating the drawing clicks as "clicked away".
+   */
+  drawingRegion: boolean
+  /** The defect box, owned by the route because it is drawn on the feed. */
+  defectRegion: DefectRegion | null
+  defectRegionMarkedAt: number
+  onDefectRegionChange: (region: DefectRegion | null) => void
+  onDrawDefectRegion: () => void
 }
 
 /**
@@ -52,6 +63,11 @@ export function ToolPalette({
   onToggleRecording,
   onRunChanged,
   onShowShortcuts,
+  drawingRegion,
+  defectRegion,
+  defectRegionMarkedAt,
+  onDefectRegionChange,
+  onDrawDefectRegion,
 }: ToolPaletteProps) {
   const toggle = (panel: PanelId) => onOpen(open === panel ? null : panel)
   const recording = telemetry.recording.active
@@ -61,6 +77,7 @@ export function ToolPalette({
   // recording.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (drawingRegion) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
       if (isTyping(event.target)) return
 
@@ -162,6 +179,11 @@ export function ToolPalette({
           client={client}
           run={run}
           motion={telemetry.motion}
+          region={defectRegion}
+          regionMarkedAt={defectRegionMarkedAt}
+          onRegionChange={onDefectRegionChange}
+          onDrawRegion={onDrawDefectRegion}
+          drawing={drawingRegion}
           onSaved={onRunChanged}
           onClose={() => onOpen(null)}
         />

@@ -3,6 +3,13 @@ import { useEffect, useRef, type ReactNode } from 'react'
 interface PopoverProps {
   title: string
   onClose: () => void
+  /**
+   * False while the panel has handed the screen to something else — drawing a
+   * defect box, say, where every pointer-down lands on the video and would
+   * otherwise read as "clicked away", closing the panel and discarding a
+   * half-filled form. Defaults to the usual click-away behaviour.
+   */
+  dismissible?: boolean
   children: ReactNode
 }
 
@@ -14,10 +21,16 @@ interface PopoverProps {
  * the sidebar's narrow column, and deliberately not a modal: it does not trap
  * focus and it does not cover the video.
  */
-export function Popover({ title, onClose, children }: PopoverProps) {
+export function Popover({
+  title,
+  onClose,
+  dismissible = true,
+  children,
+}: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    if (!dismissible) return
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
@@ -30,7 +43,7 @@ export function Popover({ title, onClose, children }: PopoverProps) {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('pointerdown', onPointerDown, true)
     }
-  }, [onClose])
+  }, [onClose, dismissible])
 
   return (
     <div

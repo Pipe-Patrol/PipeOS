@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { Preflight, PREFLIGHT_CHECKS } from '@/components/live/Preflight'
+import { RegionDrawer } from '@/components/live/RegionDrawer'
 import { ShortcutOverlay } from '@/components/live/ShortcutOverlay'
 import { StartRunPrompt } from '@/components/live/StartRunPrompt'
 import { VideoFeed } from '@/components/live/VideoFeed'
@@ -16,7 +17,7 @@ import { useDriveInput } from '@/input/useDriveInput'
 import { saveRunJson, saveSnapshotLocally } from '@/lib/localSave'
 import { useRobot } from '@/robot/RobotProvider'
 import { useRun } from '@/robot/useRun'
-import type { Run } from '@/robot/types'
+import type { DefectRegion, Run } from '@/robot/types'
 
 /**
  * The driving screen.
@@ -50,11 +51,35 @@ export function LiveRoute() {
   } | null>(null)
   // The folder to mirror this run into, once it has started. Null = robot only.
   const [saveDir, setSaveDir] = useState<FileSystemDirectoryHandle | null>(null)
+  // The defect box lives here rather than in the panel, because it is drawn on
+  // the feed and the panel only displays it.
+  const [defectRegion, setDefectRegion] = useState<DefectRegion | null>(null)
+  const [defectRegionMarkedAt, setDefectRegionMarkedAt] = useState(0)
+  const [drawingRegion, setDrawingRegion] = useState(false)
+
+  // Stamped here, where the box is actually committed, so the panel's still
+  // freezes on one frame instead of chasing the region in an effect.
+  const markRegion = useCallback((region: DefectRegion | null) => {
+    setDefectRegion(region)
+    if (region) setDefectRegionMarkedAt(Date.now())
+  }, [])
 
   const activeRunId = telemetry?.run.active ? telemetry.run.id : null
   const { run, refresh: refreshRun } = useRun(client, activeRunId)
 
-  const modalOpen = showShortcuts || showWalkthrough || preflight !== null
+  // Driving is locked while any of these has the screen — including drawing,
+  // where the operator is pointing at pipe wall rather than watching where the
+  // robot is going, and a stray key would move it out from under the box.
+  const modalOpen =
+    showShortcuts || showWalkthrough || preflight !== null || drawingRegion
+
+  const startDrawingRegion = useCallback(() => {
+    // Always draw at 1x. Screen-to-frame mapping assumes the whole frame is on
+    // show, so a box drawn while zoomed in would be filed against the wrong
+    // part of the picture — and silently, which is the worst kind of wrong.
+    setZoom(1)
+    setDrawingRegion(true)
+  }, [])
 
   const snapshot = useCallback(async () => {
     if (!client || !activeRunId) return
@@ -144,13 +169,16 @@ export function LiveRoute() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === '?') setShowShortcuts(true)
       if (event.key === 'Escape') {
+        // While drawing, Esc belongs to the drawer alone. Closing the panel
+        // here as well would throw away the half-filled defect form behind it.
+        if (drawingRegion) return
         setShowShortcuts(false)
         setPanel(null)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [drawingRegion])
 
   if (!client) return null
 
@@ -181,7 +209,14 @@ export function LiveRoute() {
               <ZoomControl zoom={zoom} onZoom={setZoom} />
             </div>
 
-            <div className="absolute top-1/2 right-5 z-10 -translate-y-1/2">
+            {/* Hidden, not unmounted, while the box is being drawn: the panel
+                holds a half-filled defect form and unmounting would throw away
+                the code, severity and note the operator already chose. */}
+            <div
+              className={`absolute top-1/2 right-5 z-10 -translate-y-1/2 ${
+                drawingRegion ? 'invisible' : ''
+              }`}
+            >
               <ToolPalette
                 client={client}
                 telemetry={telemetry}
@@ -199,8 +234,23 @@ export function LiveRoute() {
                   }
                 }}
                 onShowShortcuts={() => setShowShortcuts(true)}
+                drawingRegion={drawingRegion}
+                defectRegion={defectRegion}
+                defectRegionMarkedAt={defectRegionMarkedAt}
+                onDefectRegionChange={markRegion}
+                onDrawDefectRegion={startDrawingRegion}
               />
             </div>
+
+            {drawingRegion && (
+              <RegionDrawer
+                onCommit={(region) => {
+                  markRegion(region)
+                  setDrawingRegion(false)
+                }}
+                onCancel={() => setDrawingRegion(false)}
+              />
+            )}
 
             <DirectionArrow
               direction={drive.direction}

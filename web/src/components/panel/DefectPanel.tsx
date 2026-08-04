@@ -1,11 +1,4 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type PointerEvent,
-  type ReactNode,
-} from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 
 import { Button } from '@/components/primitives/Button'
 import { EmptyState } from '@/components/primitives/EmptyState'
@@ -20,11 +13,21 @@ interface DefectPanelProps {
   client: RobotClient
   run: Run | null
   motion: Motion
+  /** Drawn on the live feed, not in here. Null until the operator marks one. */
+  region: DefectRegion | null
+  /**
+   * When the region was marked. Doubles as the cache-buster for the still, so
+   * the preview freezes on one frame — the one the defect is filed against.
+   */
+  regionMarkedAt: number
+  onRegionChange: (region: DefectRegion | null) => void
+  /** Hands the feed over to the drawing overlay. */
+  onDrawRegion: () => void
+  /** True while the operator is drawing on the feed rather than in here. */
+  drawing: boolean
   onSaved: () => void
   onClose: () => void
 }
-
-const clamp01 = (n: number) => Math.min(1, Math.max(0, n))
 
 /** Clock face 1..12 from where the box sits on the circular pipe view. */
 function clockFromRegion(region: DefectRegion): number {
@@ -41,21 +44,32 @@ function clockFromRegion(region: DefectRegion): number {
  *
  * The chainage is stamped server-side at the moment the request lands — never
  * typed. The clock position is not typed either: it is read off the box the
- * operator drags over a still of the frame, so the picture and the pipe-wall
- * position can never disagree. That box travels with the defect as its region.
+ * operator draws, so the picture and the pipe-wall position can never disagree.
+ * That box travels with the defect as its region.
+ *
+ * The box is drawn on the live feed rather than in here. Asking someone to find
+ * a hairline crack a second time, in a thumbnail, is asking them to mark the
+ * wrong thing; the preview below is a record of what they marked, not the
+ * instrument for marking it.
  */
-export function DefectPanel({ client, run, motion, onSaved, onClose }: DefectPanelProps) {
+export function DefectPanel({
+  client,
+  run,
+  motion,
+  region,
+  regionMarkedAt,
+  onRegionChange,
+  onDrawRegion,
+  drawing,
+  onSaved,
+  onClose,
+}: DefectPanelProps) {
   const [code, setCode] = useState(DEFECT_TYPES[0].code)
   const [severity, setSeverity] = useState(3)
   const [note, setNote] = useState('')
-  const [region, setRegion] = useState<DefectRegion | null>(null)
-  const [frameNonce, setFrameNonce] = useState(() => Date.now())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
-
-  const previewRef = useRef<HTMLDivElement>(null)
-  const dragStart = useRef<{ x: number; y: number } | null>(null)
 
   // A live clock so "Time logged" reads as the moment it will be filed.
   useEffect(() => {
@@ -63,23 +77,7 @@ export function DefectPanel({ client, run, motion, onSaved, onClose }: DefectPan
     return () => clearInterval(timer)
   }, [])
 
-  // Keep the preview live until the operator starts boxing, then freeze on the
-  // frame they drew over — that still is what the defect is filed against.
-  useEffect(() => {
-    if (region) return
-    const timer = setInterval(() => setFrameNonce(Date.now()), 800)
-    return () => clearInterval(timer)
-  }, [region])
-
   const clock = region ? clockFromRegion(region) : null
-
-  const pointAt = (event: PointerEvent) => {
-    const rect = previewRef.current!.getBoundingClientRect()
-    return {
-      x: clamp01((event.clientX - rect.left) / rect.width),
-      y: clamp01((event.clientY - rect.top) / rect.height),
-    }
-  }
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -99,8 +97,7 @@ export function DefectPanel({ client, run, motion, onSaved, onClose }: DefectPan
         }),
       })
       setNote('')
-      setRegion(null)
-      setFrameNonce(Date.now())
+      onRegionChange(null)
       onSaved()
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'could not save')
@@ -118,7 +115,7 @@ export function DefectPanel({ client, run, motion, onSaved, onClose }: DefectPan
   }
 
   return (
-    <Popover title="Log a defect" onClose={onClose}>
+    <Popover title="Log a defect" onClose={onClose} dismissible={!drawing}>
       <form onSubmit={submit} className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <span className="label">Observation</span>
@@ -138,7 +135,7 @@ export function DefectPanel({ client, run, motion, onSaved, onClose }: DefectPan
                 </optgroup>
               ))}
             </select>
-            <span className="shrink-0 text-[16px] font-bold tnum text-ink-0">
+            <span className="shrink-0 text-[16px] font-medium tnum text-ink-0">
               @ {format.metres(motion.chainage_m)}
             </span>
           </div>
@@ -172,51 +169,53 @@ export function DefectPanel({ client, run, motion, onSaved, onClose }: DefectPan
         </fieldset>
 
         <div className="flex flex-col gap-1.5">
-          <span className="label">Location on frame — drag to box the defect</span>
-          <div
-            ref={previewRef}
-            className="relative aspect-[4/3] w-full cursor-crosshair touch-none overflow-hidden rounded-panel border border-ink-800 bg-black select-none"
-            onPointerDown={(event) => {
-              event.currentTarget.setPointerCapture(event.pointerId)
-              const p = pointAt(event)
-              dragStart.current = p
-              setRegion({ x: p.x, y: p.y, w: 0, h: 0 })
-            }}
-            onPointerMove={(event) => {
-              const start = dragStart.current
-              if (!start) return
-              const p = pointAt(event)
-              setRegion({
-                x: Math.min(start.x, p.x),
-                y: Math.min(start.y, p.y),
-                w: Math.abs(p.x - start.x),
-                h: Math.abs(p.y - start.y),
-              })
-            }}
-            onPointerUp={() => {
-              dragStart.current = null
-              setRegion((r) => (r && (r.w < 0.02 || r.h < 0.02) ? null : r))
-            }}
-          >
-            <img
-              key={frameNonce}
-              src={client.cameraUrl(frameNonce)}
-              alt=""
-              draggable={false}
-              className="pointer-events-none h-full w-full object-cover"
-            />
-            {region && (
-              <div
-                className="pointer-events-none absolute border-2 border-state-fault-signal"
-                style={{
-                  left: `${region.x * 100}%`,
-                  top: `${region.y * 100}%`,
-                  width: `${region.w * 100}%`,
-                  height: `${region.h * 100}%`,
-                }}
-              />
-            )}
-          </div>
+          <span className="label">Location on frame</span>
+          {region ? (
+            <>
+              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-panel border border-ink-800 bg-black">
+                <img
+                  key={regionMarkedAt}
+                  src={client.cameraUrl(regionMarkedAt)}
+                  alt="The frame this defect is filed against"
+                  draggable={false}
+                  className="h-full w-full object-cover"
+                />
+                <div
+                  className="absolute border-2 border-state-fault-signal"
+                  style={{
+                    left: `${region.x * 100}%`,
+                    top: `${region.y * 100}%`,
+                    width: `${region.w * 100}%`,
+                    height: `${region.h * 100}%`,
+                  }}
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={onDrawRegion}
+                  className="rounded-sm border border-ink-800 px-2 py-1 text-[11px] text-ink-400 hover:bg-white/10 hover:text-ink-100"
+                >
+                  Redraw box
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRegionChange(null)}
+                  className="rounded-sm border border-ink-800 px-2 py-1 text-[11px] text-ink-400 hover:bg-white/10 hover:text-ink-100"
+                >
+                  Clear
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={onDrawRegion}
+              className="flex aspect-[4/3] w-full items-center justify-center rounded-panel border border-dashed border-ink-700 bg-white/2 text-[12px] text-ink-400 transition-colors hover:border-ink-500 hover:bg-white/6 hover:text-ink-100"
+            >
+              Click here to draw box
+            </button>
+          )}
         </div>
 
         <label className="flex flex-col gap-1.5">

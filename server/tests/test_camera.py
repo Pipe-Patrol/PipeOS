@@ -209,6 +209,107 @@ def test_an_unmounted_rotation_touches_no_pixels(monkeypatch):
     assert cv2.calls == []
 
 
+# --- losing the camera mid-run -------------------------------------------
+#
+# A knocked USB cable used to be terminal: reads failed forever, the backend
+# still called itself streaming so nothing retried, and only a service restart
+# brought the picture back.
+
+
+class _FlakyCapture:
+    """A capture that dies after N frames, and can be revived on a new node."""
+
+    def __init__(self, alive_for):
+        self.remaining = alive_for
+        self.released = False
+
+    def read(self):
+        if self.remaining <= 0:
+            return False, None
+        self.remaining -= 1
+        return True, object()
+
+    def get(self, _prop):
+        return 640
+
+    def set(self, _prop, _value):
+        return True
+
+    def release(self):
+        self.released = True
+
+
+class _CaptureCv2(_FakeCv2):
+    """_FakeCv2 plus the capture-property constants the USB backend reads."""
+
+    CAP_PROP_FRAME_WIDTH = "w"
+    CAP_PROP_FRAME_HEIGHT = "h"
+    CAP_PROP_BRIGHTNESS = "brightness"
+    CAP_PROP_CONTRAST = "contrast"
+
+
+def _usb_backend_with(monkeypatch, scans):
+    """A USB backend whose _scan returns each queued (capture, index) in turn."""
+    backend = camera_module._UsbBackend(camera_module.StreamingOutput())
+    backend._cv2 = _CaptureCv2()
+    queue = list(scans)
+    monkeypatch.setattr(
+        camera_module, "_v4l2_control_range", lambda *_: (0, 255, 128)
+    )
+    backend._scan = lambda: queue.pop(0) if queue else (None, None)
+    return backend
+
+
+def test_a_dead_camera_is_reopened_on_whatever_node_it_returns_on(monkeypatch):
+    """The regression: unplug and replug must recover without a restart."""
+    revived = _FlakyCapture(alive_for=5)
+    backend = _usb_backend_with(monkeypatch, [(revived, 2)])
+    backend._capture = _FlakyCapture(alive_for=0)
+
+    assert backend._reconnect() is True
+    assert backend._capture is revived
+    assert backend._index == 2, "must adopt the new node, not the old one"
+    assert backend.detail.endswith("/dev/video2")
+
+
+def test_reconnect_releases_the_dead_handle(monkeypatch):
+    dead = _FlakyCapture(alive_for=0)
+    backend = _usb_backend_with(monkeypatch, [(_FlakyCapture(alive_for=5), 0)])
+    backend._capture = dead
+
+    backend._reconnect()
+    assert dead.released is True, "leaking the old fd would exhaust the device"
+
+
+def test_reconnect_reports_failure_when_the_camera_is_still_gone(monkeypatch):
+    backend = _usb_backend_with(monkeypatch, [])  # scan finds nothing
+    backend._capture = _FlakyCapture(alive_for=0)
+    assert backend._reconnect() is False
+
+
+def test_tuning_survives_a_reconnect(monkeypatch):
+    """A loose cable must not silently reset the operator's brightness."""
+    backend = _usb_backend_with(monkeypatch, [(_FlakyCapture(alive_for=5), 1)])
+    backend._capture = _FlakyCapture(alive_for=0)
+
+    tuning = camera_module.Tuning()
+    tuning.update(brightness=0.5, contrast=-0.25)
+    backend.apply_tuning(tuning)
+
+    backend._reconnect()
+    assert backend._tuning is tuning
+
+
+def test_the_scan_is_fresh_rather_than_the_remembered_index(monkeypatch):
+    """Pinning the mechanism: recovery must not reuse the old node number."""
+    backend = _usb_backend_with(monkeypatch, [(_FlakyCapture(alive_for=5), 7)])
+    backend._capture = _FlakyCapture(alive_for=0)
+    backend._index = 0
+
+    backend._reconnect()
+    assert backend._index == 7
+
+
 def test_orientation_is_not_reachable_through_tuning():
     """The whole point of making it fixed: no request can turn it off."""
     tuning = camera_module.Tuning()

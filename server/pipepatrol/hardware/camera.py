@@ -69,6 +69,14 @@ FRAME_WAIT_TIMEOUT_S = 5.0
 USB_MAX_DEVICE_INDEX = 9  # scan /dev/video0 .. /dev/video9
 BOUNDARY = "frame"
 
+# A USB camera that stops delivering is usually gone rather than slow: a knocked
+# cable, a brown-out on the bus. Reads then fail forever and nothing upstream
+# notices, because the backend is still "streaming" -- it just never produces a
+# frame again. So the capture thread gives it about two seconds and then goes and
+# opens the device again itself.
+RECONNECT_AFTER_FAILURES = 20  # x the 0.1 s read-failure sleep
+RECONNECT_INTERVAL_S = 2.0
+
 # Dehaze is CLAHE on the luminance channel. Pipes are low-contrast and hazy
 # under LED light, and local histogram equalisation is what actually recovers
 # texture there -- a global curve just clips the highlights off the pipe crown.
@@ -240,6 +248,7 @@ class _CsiBackend:
     def __init__(self, output):
         self._output = output
         self._picam = None
+        self.detail = None
 
     def _video_config(self, picam):
         """Stream config, with the mounting rotation folded into the ISP transform.
@@ -283,7 +292,8 @@ class _CsiBackend:
         picam.configure(self._video_config(picam))
         picam.start_recording(JpegEncoder(q=JPEG_QUALITY), FileOutput(self._output))
         self._picam = picam
-        return f"{RESOLUTION[0]}x{RESOLUTION[1]}"
+        self.detail = f"{RESOLUTION[0]}x{RESOLUTION[1]}"
+        return self.detail
 
     def apply_tuning(self, tuning):
         """picamera2 takes brightness as -1..1 and contrast as a 0..n multiplier."""
@@ -323,12 +333,18 @@ class _UsbBackend:
         self._cv2 = None
         self._index = None
         self._ranges = {}
+        self.detail = None
+        # Remembered so it can be re-applied to a device that came back.
+        self._tuning = None
 
-    def start(self):
-        import cv2
+    def _scan(self):
+        """Find a readable capture device. Returns (capture, index) or (None, None).
 
-        self._cv2 = cv2
-        capture, index = None, None
+        Always a fresh scan, never a remembered index: a camera that is unplugged
+        and plugged back in typically returns on a different /dev/video node, so
+        reopening the old one would fail for as long as the robot is up.
+        """
+        cv2 = self._cv2
         for candidate in range(USB_MAX_DEVICE_INDEX + 1):
             probe = cv2.VideoCapture(candidate, cv2.CAP_V4L2)
             if not probe.isOpened():
@@ -343,18 +359,16 @@ class _UsbBackend:
 
             ok, _ = probe.read()
             if ok:
-                capture, index = probe, candidate
-                break
+                return probe, candidate
             probe.release()
+        return None, None
 
-        if capture is None:
-            raise RuntimeError(
-                f"no readable USB camera on /dev/video0..{USB_MAX_DEVICE_INDEX}"
-            )
-
+    def _adopt(self, capture, index):
+        """Take a freshly opened device as the live one, and re-learn its controls."""
+        cv2 = self._cv2
         self._capture = capture
         self._index = index
-        # Ask the driver what these controls actually expect, once, at start.
+        self._ranges = {}
         for key, cid in (
             ("brightness", V4L2_CID_BRIGHTNESS),
             ("contrast", V4L2_CID_CONTRAST),
@@ -366,13 +380,49 @@ class _UsbBackend:
                 log.info("camera %s range: min=%d max=%d default=%d", key, *bounds)
                 self._ranges[key] = bounds
 
+        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)) or RESOLUTION[0]
+        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)) or RESOLUTION[1]
+        self.detail = f"{width}x{height} on /dev/video{index}"
+
+    def start(self):
+        import cv2
+
+        self._cv2 = cv2
+        capture, index = self._scan()
+        if capture is None:
+            raise RuntimeError(
+                f"no readable USB camera on /dev/video0..{USB_MAX_DEVICE_INDEX}"
+            )
+
+        self._adopt(capture, index)
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="usb-camera", daemon=True)
         self._thread.start()
+        return self.detail
 
-        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)) or RESOLUTION[0]
-        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)) or RESOLUTION[1]
-        return f"{width}x{height} on /dev/video{index}"
+    def _reconnect(self):
+        """Drop the dead handle and go looking for the camera again.
+
+        Whatever tuning was in force is re-applied, because a re-enumerated
+        device comes back at the driver's defaults and the operator did not ask
+        for their brightness to be forgotten by a loose cable.
+        """
+        if self._capture is not None:
+            try:
+                self._capture.release()
+            except Exception:  # noqa: BLE001 - it is already gone
+                pass
+            self._capture = None
+
+        capture, index = self._scan()
+        if capture is None:
+            return False
+
+        self._adopt(capture, index)
+        if self._tuning is not None:
+            self.apply_tuning(self._tuning)
+        log.info("USB camera reconnected: %s", self.detail)
+        return True
 
     def apply_tuning(self, tuning):
         """Map -1..1 onto each control's real range, queried from the driver.
@@ -382,6 +432,7 @@ class _UsbBackend:
         setting is indistinguishable from an applied one, which is exactly how
         "the image settings do nothing" goes unnoticed.
         """
+        self._tuning = tuning
         if self._capture is None or self._cv2 is None:
             return
         cv2 = self._cv2
@@ -416,6 +467,15 @@ class _UsbBackend:
                 failures += 1
                 if failures == 10:
                     log.warning("USB camera stopped returning frames")
+                if failures >= RECONNECT_AFTER_FAILURES:
+                    # Reads are not coming back on their own. Go and find the
+                    # device again rather than spinning here until someone
+                    # restarts the service.
+                    if self._reconnect():
+                        failures = 0
+                    else:
+                        self._stop.wait(RECONNECT_INTERVAL_S)
+                    continue
                 self._stop.wait(0.1)
                 continue
 
@@ -619,7 +679,10 @@ class Camera:
         return {
             "available": self._streaming,
             "source": self._backend.name if self._backend else None,
-            "resolution": self._detail,
+            # Read off the backend, not remembered from start: a camera that
+            # reconnected may be on a different node, and a status line naming
+            # the node it used to be on is worse than none.
+            "resolution": self._backend.detail if self._backend else None,
             "tuning": self.tuning.as_dict(),
             "error": self._error,
         }
