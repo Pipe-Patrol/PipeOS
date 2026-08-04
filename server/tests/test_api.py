@@ -1,0 +1,177 @@
+"""The HTTP surface, driven through the real app with no hardware present.
+
+Every device is absent on a laptop, which is the interesting case: the server
+has to come up, report honestly what is missing, and still stop the motors.
+"""
+
+import pytest
+from fastapi.testclient import TestClient
+
+from pipepatrol import config
+from pipepatrol.app import app, create_app
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    with TestClient(app) as client:
+        yield client
+
+
+class TestHealth:
+    def test_identifies_itself(self, client):
+        body = client.get("/api/health").json()
+        assert body["service"] == "pipepatrol"
+        assert "version" in body
+
+    def test_reports_what_is_not_wired(self, client):
+        body = client.get("/api/health").json()
+        assert "battery" in body["unavailable"]
+        assert "motor_current" in body["unavailable"]
+
+    def test_reports_absent_hardware_as_absent(self, client):
+        capabilities = client.get("/api/health").json()["capabilities"]
+        assert capabilities["motors"] is False  # no gpiozero on a laptop
+        assert capabilities["detector"] is False  # no model ships yet
+
+
+class TestStop:
+    def test_works_without_a_websocket(self, client):
+        body = client.post("/api/stop").json()
+        assert body["ok"] is True
+        assert body["drive"]["moving"] is False
+
+
+class TestTelemetry:
+    def test_envelope_labels_unavailable_readings(self, client):
+        body = client.get("/api/telemetry").json()
+        assert body["power"]["battery"]["quality"] == "unavailable"
+        assert body["power"]["battery"]["percent"] is None
+
+    def test_motion_is_labelled_estimated(self, client):
+        body = client.get("/api/telemetry").json()
+        assert body["motion"]["quality"] == "estimated"
+
+    def test_alert_names_the_missing_camera(self, client):
+        body = client.get("/api/telemetry").json()
+        assert body["alert"] is not None
+
+
+class TestLed:
+    def test_clamps_out_of_range_requests(self, client):
+        assert client.post("/api/led", json={"level": 5.0}).status_code == 422
+        assert client.post("/api/led", json={"level": 0.5}).status_code == 200
+
+
+class TestRuns:
+    def test_start_list_and_end(self, client):
+        started = client.post("/api/runs", json={"name": "MH12"}).json()["run"]
+        assert started["name"] == "MH12"
+
+        listing = client.get("/api/runs").json()
+        assert listing["active_run_id"] == started["id"]
+
+        ended = client.post(f"/api/runs/{started['id']}/end").json()["run"]
+        assert ended["ended_at"] is not None
+
+    def test_ending_a_run_that_is_not_active_is_a_conflict(self, client):
+        run = client.post("/api/runs", json={"name": "a"}).json()["run"]
+        client.post(f"/api/runs/{run['id']}/end")
+        assert client.post(f"/api/runs/{run['id']}/end").status_code == 409
+
+    def test_defect_is_stamped_with_chainage_and_its_uncertainty(self, client):
+        run = client.post("/api/runs", json={"name": "a"}).json()["run"]
+
+        defect = client.post(
+            f"/api/runs/{run['id']}/defects",
+            json={"code": "RB", "severity": 4, "with_snapshot": False},
+        ).json()["defect"]
+
+        assert defect["code"] == "RB"
+        assert defect["chainage_m"] is not None
+        assert defect["chainage_uncertainty_m"] is not None
+
+    def test_severity_outside_one_to_five_is_rejected(self, client):
+        run = client.post("/api/runs", json={"name": "a"}).json()["run"]
+        response = client.post(
+            f"/api/runs/{run['id']}/defects", json={"code": "RB", "severity": 9}
+        )
+        assert response.status_code == 422
+
+    def test_missing_run_is_a_404(self, client):
+        assert client.get("/api/runs/nosuchrun").status_code == 404
+
+    def test_active_run_cannot_be_deleted(self, client):
+        run = client.post("/api/runs", json={"name": "a"}).json()["run"]
+        assert client.delete(f"/api/runs/{run['id']}").status_code == 409
+
+    def test_export_formats(self, client):
+        run = client.post("/api/runs", json={"name": "a"}).json()["run"]
+        client.post(f"/api/runs/{run['id']}/end")
+
+        assert client.get(f"/api/runs/{run['id']}/export.json").status_code == 200
+        assert client.get(f"/api/runs/{run['id']}/export.csv").status_code == 200
+        assert client.get(f"/api/runs/{run['id']}/export.zip").status_code == 200
+        assert client.get(f"/api/runs/{run['id']}/export.pdf").status_code == 400
+
+    def test_snapshot_path_cannot_escape_the_run_directory(self, client):
+        run = client.post("/api/runs", json={"name": "a"}).json()["run"]
+        response = client.get(f"/api/runs/{run['id']}/snapshots/..%2F..%2Frun.json")
+        assert response.status_code in (400, 404)
+
+
+class TestMedia:
+    def test_camera_reports_unavailable_rather_than_erroring(self, client):
+        assert client.get("/api/camera").status_code == 503
+
+    def test_snapshot_without_a_run_is_a_conflict(self, client):
+        assert client.post("/api/snapshot").status_code == 409
+
+    def test_tuning_is_accepted_and_echoed(self, client):
+        body = client.post(
+            "/api/camera/tuning", json={"brightness": 0.2, "dehaze": True}
+        ).json()
+        assert body["tuning"]["brightness"] == 0.2
+        assert body["tuning"]["dehaze"] is True
+
+    def test_tuning_out_of_range_is_rejected(self, client):
+        assert (
+            client.post("/api/camera/tuning", json={"brightness": 4.0}).status_code
+            == 422
+        )
+
+
+class TestConsoleCaching:
+    """A deploy must be visible on the next page load, not the one after.
+
+    index.html names the hashed bundle. Served without a Cache-Control header it
+    is subject to the browser's freshness heuristic, which serves the cached copy
+    without asking -- the console then shows the previous deploy until something
+    forces a reload.
+    """
+
+    @pytest.fixture
+    def console(self, tmp_path, monkeypatch):
+        dist = tmp_path / "dist"
+        (dist / "assets").mkdir(parents=True)
+        (dist / "index.html").write_text("<!doctype html><title>PipeOS</title>")
+        (dist / "assets" / "index-abc123.js").write_text("console.log(1)")
+        (dist / "favicon.svg").write_text("<svg/>")
+        monkeypatch.setattr(config, "WEB_DIST", dist)
+        monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+        with TestClient(create_app()) as client:
+            yield client
+
+    def test_index_revalidates(self, console):
+        assert console.get("/").headers["cache-control"] == "no-cache"
+
+    def test_client_side_routes_revalidate(self, console):
+        assert console.get("/runs/abc123").headers["cache-control"] == "no-cache"
+
+    def test_unhashed_files_revalidate(self, console):
+        assert console.get("/favicon.svg").headers["cache-control"] == "no-cache"
+
+    def test_hashed_assets_are_kept(self, console):
+        cache_control = console.get("/assets/index-abc123.js").headers["cache-control"]
+        assert "immutable" in cache_control
+        assert "max-age=31536000" in cache_control

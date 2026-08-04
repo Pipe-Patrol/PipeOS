@@ -1,0 +1,28 @@
+# PipeOS control server
+#
+# Install into a venv created with --system-site-packages, so picamera2 and the
+# apt-managed GPIO libraries stay visible. See docs/HARDWARE.md.
+#
+# NOT installable with pip on Raspberry Pi OS -- use apt for these:
+#   sudo apt install python3-picamera2 python3-gpiozero python3-lgpio
+#
+# OpenCV drives USB cameras AND the optical-flow odometry. Without it the server
+# still runs; distance falls back to duty integration and reports that it has.
+#   sudo apt install python3-opencv
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+websockets==14.1
+pydantic==2.10.4
+
+# GPIO. gpiozero needs lgpio as its pin factory on the Pi 5; RPi.GPIO does not
+# work there. Both usually come from apt already -- these are the fallback.
+gpiozero==2.0.1
+lgpio==0.2.2.0
+
+# BNO085 IMU over I2C.
+adafruit-blinka==8.51.0
+adafruit-circuitpython-bno08x==1.2.4
+
+# Tests. Safety and estimator tests need no hardware and run anywhere.
+pytest==8.3.4

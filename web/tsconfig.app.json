@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    // vite/client declares the CSS and asset side-effect imports; without it
+    // `noUncheckedSideEffectImports` rejects `import '@/index.css'`.
+    "types": ["vite/client", "vitest/globals"],
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["src"]
+}

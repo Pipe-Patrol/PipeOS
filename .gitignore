@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+web/dist/
+*.local
+# tsc incremental caches — machine-specific, rewritten by every build
+*.tsbuildinfo
+
+# Runtime data — runs, snapshots, and recordings live here on the Pi
+server/data/
+
+# Local-only temporary testing (in-browser robot simulator). Private.
+temptest/
+
+# Editors / OS
+.DS_Store
+.gstack/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json

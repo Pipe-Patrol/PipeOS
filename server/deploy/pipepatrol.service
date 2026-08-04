@@ -1,0 +1,21 @@
+[Unit]
+Description=PipeOS control server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pipepatrol
+WorkingDirectory=/home/pipepatrol/PipeOS/server
+ExecStart=/home/pipepatrol/PipeOS/server/.venv/bin/python -m pipepatrol
+Restart=on-failure
+RestartSec=3
+
+# SIGINT rather than SIGTERM: the handlers in app.py cut the motors on both, but
+# SIGINT is the path exercised every time anyone Ctrl-Cs the server by hand, so
+# it is the one that is actually tested.
+KillSignal=SIGINT
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

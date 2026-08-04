@@ -1,0 +1,192 @@
+@import 'tailwindcss';
+
+/*
+ * PipePatrol operator theme, carried over from PipePatrolApp.
+ *
+ * Two rules govern everything here:
+ *   1. The neutral scale is PURE greyscale — R == G == B on every step. No blue,
+ *      no warm tint. Anything with a hue in this file is a state signal, and a
+ *      state signal only.
+ *   2. This UI is read on a laptop in a van, often at night, sometimes in glare.
+ *      Contrast steps are wide and deliberate; there are no low-contrast
+ *      decorative greys.
+ */
+
+@theme {
+  /* ---- Neutral scale (pure greyscale) ---- */
+  --color-ink-0: #ffffff;
+  --color-ink-100: #ededed;
+  --color-ink-200: #d6d6d6;
+  --color-ink-300: #b0b0b0;
+  --color-ink-400: #8a8a8a;
+  --color-ink-500: #666666;
+  --color-ink-600: #4a4a4a;
+  --color-ink-700: #333333;
+  --color-ink-750: #262626;
+  --color-ink-800: #1c1c1c;
+  --color-ink-850: #151515;
+  --color-ink-900: #0f0f0f;
+  --color-ink-950: #080808;
+  --color-ink-1000: #000000;
+
+  /*
+   * ---- State signals ----
+   * Each state has a `-surface` (fills the status bar, must carry white text at
+   * >= 4.5:1) and a `-signal` (dots, strokes, text on a dark surface).
+   * IDLE is intentionally hueless: nothing is happening.
+   */
+  --color-state-idle-surface: #262626;
+  --color-state-idle-signal: #8a8a8a;
+
+  --color-state-recording-surface: #14663a;
+  --color-state-recording-signal: #3ddc84;
+
+  --color-state-warning-surface: #7a4a06;
+  --color-state-warning-signal: #f5a524;
+
+  --color-state-fault-surface: #7a1a16;
+  --color-state-fault-signal: #f04438;
+
+  /* ---- Gauge fills ---- */
+  --color-gauge-good: #2f9e60;
+  --color-gauge-reserve: #c9911a;
+  --color-gauge-spent: #5c5c5c;
+
+  /* ---- Severity ramp, for defect rows ---- */
+  --color-sev-low: #8a8a8a;
+  --color-sev-moderate: #c9c9c9;
+  --color-sev-high: #f5a524;
+  --color-sev-critical: #f04438;
+
+  /* ---- Typography ---- */
+  --font-sans:
+    'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  /* ---- Corner radii. Everything is rounded; nothing squares off. ---- */
+  --radius-sm: 8px;
+  --radius-panel: 12px;
+  --radius-lg: 16px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--color-ink-1000);
+  color: var(--color-ink-100);
+  font-family: var(--font-sans);
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  color-scheme: dark;
+}
+
+/*
+ * Telemetry digits must not reflow as they change. Inter's tabular figures do
+ * this without dropping to a mono face.
+ */
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/*
+ * The overlay readout style: white text sitting IN the video, with no panel.
+ *
+ * A filled box over the frame reads as a different app bolted on top. Because
+ * the pipe wall can be any brightness, a shadow does the legibility work a
+ * background would otherwise do.
+ */
+@utility overlay-text {
+  color: rgb(255 255 255 / 0.82);
+  text-shadow:
+    0 1px 4px rgb(0 0 0 / 0.9),
+    0 0 14px rgb(0 0 0 / 0.55);
+}
+
+/*
+ * A value that just changed goes briefly to full white. The only motion in the
+ * readout, and it answers a question an operator genuinely asks at 2 am: is
+ * this number live, or has the feed frozen with the last value still on screen?
+ */
+@utility overlay-flash {
+  animation: overlay-flash 420ms ease-out;
+}
+
+@keyframes overlay-flash {
+  from {
+    color: rgb(255 255 255 / 1);
+  }
+  to {
+    color: rgb(255 255 255 / 0.82);
+  }
+}
+
+/** Glass, for things that float over the video: the palette, map and popovers. */
+@utility panel {
+  background: rgb(8 8 8 / 0.82);
+  border: 1px solid var(--color-ink-800);
+  border-radius: var(--radius-panel);
+  backdrop-filter: blur(14px) saturate(0.9);
+  -webkit-backdrop-filter: blur(14px) saturate(0.9);
+  box-shadow:
+    0 6px 20px rgb(0 0 0 / 0.45),
+    inset 0 1px 0 rgb(255 255 255 / 0.05);
+}
+
+/** Section labels and column headers. Small, spaced, never shouty. */
+@utility label {
+  font-size: 10.5px;
+  line-height: 13px;
+  font-weight: 500;
+  color: var(--color-ink-400);
+  white-space: nowrap;
+}
+
+/**
+ * Titles only. The tighter tracking is the entire difference between a title
+ * and a label here — a second typeface for six words of chrome would cost a
+ * font download the van's network may not be able to make.
+ */
+@utility display {
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+/* Motion is functional here, never decorative. */
+@keyframes dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@utility animate-dot-pulse {
+  animation: dot-pulse 1.6s ease-in-out infinite;
+}
+
+/* A white bloom over the frame the instant a snapshot is taken — the shutter. */
+@keyframes capture-flash {
+  from {
+    opacity: 0.85;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@utility capture-flash {
+  animation: capture-flash 220ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,16 @@
+[project]
+name = "pipepatrol"
+version = "1.0.0"
+description = "Control server for the PipePatrol pipe inspection robot"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 90
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "ARG"]
