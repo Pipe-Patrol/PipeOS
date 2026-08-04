@@ -19,6 +19,12 @@ interface TuningPanelProps {
  * Dehaze cannot be — it is a pixel operation, so enabling it starts a worker
  * that decodes, equalises and re-encodes every frame. That is why it is off by
  * default and why the frame rate drops while it is on.
+ *
+ * There is no rotate or flip here, deliberately. The camera is mounted upside
+ * down and the robot turns every frame 180° at the source, so the picture is
+ * already the right way up by the time it reaches anything — the stream, the
+ * recording, the detector. Exposing it as a control would only add a way to get
+ * it wrong. See MOUNT_ROTATION in camera.py.
  */
 export function TuningPanel({ camera, onChange, onClose }: TuningPanelProps) {
   const { tuning, available } = camera

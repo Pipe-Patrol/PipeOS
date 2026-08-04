@@ -36,6 +36,22 @@ controls, or V4L2 controls -- so they cost nothing per frame. Dehaze cannot be:
 it is a pixel operation, so enabling it starts a worker that decodes, processes
 and re-encodes every frame. That is real CPU on a Pi that is also running flow
 and inference, so it is off by default and the cost is the reason.
+
+MOUNTING. The camera is bolted into the chassis upside down, so every frame is
+turned 180 degrees. That is deliberately a constant and not an operator control:
+it describes how the hardware is fitted, not how anyone prefers to look at it,
+and a picture that is upright only because somebody remembered to set a toggle
+is a picture that will be upside down in somebody's recording. If the camera is
+ever remounted, change MOUNT_ROTATION and nothing else.
+
+It is applied at the source, so the live stream, snapshots, the recording,
+optical flow and the detector all see the same upright picture. A CSS transform
+in the console would have been free, but it would have turned only what the
+operator sees and left the recorded video on its head.
+
+The cost is near zero on the USB path: that loop already has a decoded frame in
+hand and already re-encodes it, so this is a rotate added to work that was
+happening anyway, not a second decode.
 """
 
 import array
@@ -135,6 +151,11 @@ class StreamingOutput(io.BufferedIOBase):
             return self.frame, self.sequence
 
 
+# How the camera is fitted, in degrees clockwise. Not a preference -- see the
+# MOUNTING note in the module docstring. This is the only place to change it.
+MOUNT_ROTATION = 180
+
+
 class Tuning:
     """Image adjustments the operator can reach. Clamped, never rejected."""
 
@@ -158,6 +179,23 @@ class Tuning:
             "contrast": round(self.contrast, 3),
             "dehaze": self.dehaze,
         }
+
+
+# Kept as a lookup rather than a hardcoded call so MOUNT_ROTATION stays the one
+# thing to edit if the camera is ever refitted at some other angle.
+_ROTATION_CODES = {
+    90: "ROTATE_90_CLOCKWISE",
+    180: "ROTATE_180",
+    270: "ROTATE_90_COUNTERCLOCKWISE",
+}
+
+
+def _apply_mount_rotation(cv2, frame):
+    """Turn a decoded frame to match how the camera is bolted in."""
+    code = _ROTATION_CODES.get(MOUNT_ROTATION)
+    if code is None:
+        return frame
+    return cv2.rotate(frame, getattr(cv2, code))
 
 
 def _clamp_unit(value):
@@ -203,6 +241,34 @@ class _CsiBackend:
         self._output = output
         self._picam = None
 
+    def _video_config(self, picam):
+        """Stream config, with the mounting rotation folded into the ISP transform.
+
+        Free here, unlike on the USB path: the ISP mirrors on the way out, so
+        nothing has to be decoded. 180 degrees is both mirrors at once, which is
+        the one rotation the ISP can express -- it cannot stand a frame on its
+        side. If MOUNT_ROTATION ever becomes 90 or 270 this backend needs a real
+        pixel rotation, so it says so rather than quietly streaming sideways.
+        """
+        main = {"size": RESOLUTION}
+        if MOUNT_ROTATION not in (0, 180):
+            log.warning(
+                "MOUNT_ROTATION of %d deg cannot be applied on the CSI path",
+                MOUNT_ROTATION,
+            )
+            return picam.create_video_configuration(main=main)
+
+        mirrored = MOUNT_ROTATION == 180
+        try:
+            from libcamera import Transform
+        except ImportError:  # pragma: no cover - only on a Pi without libcamera
+            if mirrored:
+                log.warning("libcamera has no Transform here; frame not rotated")
+            return picam.create_video_configuration(main=main)
+        return picam.create_video_configuration(
+            main=main, transform=Transform(hflip=mirrored, vflip=mirrored)
+        )
+
     def start(self):
         # Check before constructing Picamera2: constructing it is what acquires
         # the device, and acquiring a USB camera here is the bug this avoids.
@@ -214,7 +280,7 @@ class _CsiBackend:
         from picamera2.outputs import FileOutput
 
         picam = Picamera2()
-        picam.configure(picam.create_video_configuration(main={"size": RESOLUTION}))
+        picam.configure(self._video_config(picam))
         picam.start_recording(JpegEncoder(q=JPEG_QUALITY), FileOutput(self._output))
         self._picam = picam
         return f"{RESOLUTION[0]}x{RESOLUTION[1]}"
@@ -355,6 +421,10 @@ class _UsbBackend:
 
             failures = 0
             try:
+                # Cheap here and nowhere else: the frame is already decoded and
+                # about to be re-encoded, so this is a rotate on work that was
+                # happening anyway rather than a decode of its own.
+                frame = _apply_mount_rotation(cv2, frame)
                 encoded, buf = cv2.imencode(".jpg", frame, params)
             except Exception as exc:  # noqa: BLE001
                 log.warning("JPEG encode failed: %s", exc)

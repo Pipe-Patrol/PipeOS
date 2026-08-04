@@ -150,8 +150,69 @@ def test_tuning_clamps_rather_than_rejecting():
 
 
 def test_status_reports_tuning():
-    """The console's CameraStatus type requires this key to exist."""
+    """The console's CameraStatus type requires these keys, and only these."""
     camera = camera_module.Camera(autostart=False)
     status = camera.status()
     assert status["tuning"] == {"brightness": 0.0, "contrast": 0.0, "dehaze": False}
     assert status["available"] is False
+
+
+# --- the mounting rotation ------------------------------------------------
+#
+# The camera is bolted in upside down. This is a fixed correction rather than an
+# operator control, so what needs pinning is that it is always applied and never
+# reachable from the API.
+
+
+class _FakeCv2:
+    """Records the calls the frame loop would make to OpenCV."""
+
+    ROTATE_90_CLOCKWISE = "cw"
+    ROTATE_180 = "180"
+    ROTATE_90_COUNTERCLOCKWISE = "ccw"
+
+    def __init__(self):
+        self.calls = []
+
+    def rotate(self, frame, code):
+        self.calls.append(("rotate", code))
+        return frame
+
+
+def test_the_camera_is_mounted_upside_down():
+    """If someone remounts the camera, this is the line that should fail."""
+    assert camera_module.MOUNT_ROTATION == 180
+
+
+def test_every_frame_is_turned():
+    cv2 = _FakeCv2()
+    camera_module._apply_mount_rotation(cv2, object())
+    assert cv2.calls == [("rotate", "180")]
+
+
+@pytest.mark.parametrize(
+    ("degrees", "code"),
+    [(90, "cw"), (180, "180"), (270, "ccw")],
+)
+def test_each_angle_maps_to_its_opencv_code(monkeypatch, degrees, code):
+    """MOUNT_ROTATION is the single knob, so it has to work at every angle."""
+    monkeypatch.setattr(camera_module, "MOUNT_ROTATION", degrees)
+    cv2 = _FakeCv2()
+    camera_module._apply_mount_rotation(cv2, object())
+    assert cv2.calls == [("rotate", code)]
+
+
+def test_an_unmounted_rotation_touches_no_pixels(monkeypatch):
+    monkeypatch.setattr(camera_module, "MOUNT_ROTATION", 0)
+    cv2 = _FakeCv2()
+    camera_module._apply_mount_rotation(cv2, object())
+    assert cv2.calls == []
+
+
+def test_orientation_is_not_reachable_through_tuning():
+    """The whole point of making it fixed: no request can turn it off."""
+    tuning = camera_module.Tuning()
+    tuning.update(brightness=0.5)
+    assert set(tuning.as_dict()) == {"brightness", "contrast", "dehaze"}
+    for absent in ("rotate", "flip_h", "flip_v"):
+        assert not hasattr(tuning, absent)

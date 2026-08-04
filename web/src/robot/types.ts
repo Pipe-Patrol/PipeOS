@@ -84,6 +84,11 @@ export interface CameraStatus {
   available: boolean
   source: 'csi' | 'usb' | null
   resolution: string | null
+  /**
+   * Orientation is absent on purpose. The frame is turned 180° on the robot to
+   * correct how the camera is mounted, before anything downstream sees it — so
+   * there is nothing here to set and nothing for the console to undo.
+   */
   tuning: { brightness: number; contrast: number; dehaze: boolean }
   error: string | null
 }

@@ -38,7 +38,11 @@ async def get_camera(robot=Depends(get_robot)):
 
 @router.post("/api/camera/tuning")
 async def post_tuning(payload: TuningRequest, robot=Depends(get_robot)):
-    """Brightness and contrast go to the sensor. Dehaze starts a pixel worker."""
+    """Brightness and contrast go to the sensor. Dehaze starts a pixel worker.
+
+    Orientation is deliberately not here: the 180 degree turn is a fixed
+    correction for how the camera is mounted, not something to adjust mid-run.
+    """
     tuning = robot.camera.set_tuning(
         brightness=payload.brightness,
         contrast=payload.contrast,

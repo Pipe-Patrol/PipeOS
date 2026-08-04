@@ -116,13 +116,17 @@ export function VideoFeed({ client, zoom, onZoom, stale }: VideoFeedProps) {
       event.preventDefault()
       anchorOn(event.clientX, event.clientY)
       const { zoom, onZoom } = liveRef.current
-      onZoom(
-        clampZoom(
-          event.ctrlKey
-            ? zoom * (1 - event.deltaY * PINCH_SENSITIVITY)
-            : zoom - Math.sign(event.deltaY) * WHEEL_STEP,
-        ),
+      const next = clampZoom(
+        event.ctrlKey
+          ? zoom * (1 - event.deltaY * PINCH_SENSITIVITY)
+          : zoom - Math.sign(event.deltaY) * WHEEL_STEP,
       )
+      // Advance the ref now rather than waiting for the render to sync it. A
+      // pinch fires faster than React re-renders, so several events land in one
+      // frame; reading the prop each time would make them all compute the same
+      // step from the same stale zoom and the gesture would barely move.
+      liveRef.current = { zoom: next, onZoom }
+      onZoom(next)
     }
 
     // Safari's pinch. `scale` is cumulative for the whole gesture, so it is
