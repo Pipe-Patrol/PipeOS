@@ -29,6 +29,7 @@ def build(robot):
     camera = robot.camera.status()
     lights = robot.lights.status()
     host = robot.host_status()
+    climate = robot.climate.status()
     odometry = robot.odometry.status()
     hazards = robot.hazards.status()
 
@@ -41,6 +42,7 @@ def build(robot):
         "power": _power(robot),
         "camera": camera,
         "lights": lights,
+        "climate": _climate(climate),
         "host": host,
         "hazards": hazards,
         "detections": [d.as_dict() for d in robot.detections.active()],
@@ -49,6 +51,22 @@ def build(robot):
         "run": robot.run_status(),
         "recording": robot.recorder.status(),
         "alert": _alert(drive, hazards, camera, host),
+    }
+
+
+def _climate(climate):
+    """Air temperature and humidity, or blanks.
+
+    Tiered like everything else: a sensor that has gone quiet reports
+    unavailable rather than holding up its last reading, because a stale
+    humidity looks exactly like a current one and this is a number an operator
+    may be asked to put in a report.
+    """
+    return {
+        "quality": QUALITY_MEASURED if climate["available"] else QUALITY_UNAVAILABLE,
+        "available": climate["available"],
+        "temperature_c": climate["temperature_c"],
+        "humidity_pct": climate["humidity_pct"],
     }
 
 

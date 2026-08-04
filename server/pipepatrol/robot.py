@@ -22,7 +22,7 @@ import time
 
 from pipepatrol import config, telemetry
 from pipepatrol.estimation import Hazards, OpticalFlow, Odometry
-from pipepatrol.hardware import Camera, Drive, IMU, Lights, host
+from pipepatrol.hardware import Camera, Climate, Drive, IMU, Lights, host
 from pipepatrol.perception import DetectionService
 from pipepatrol.runs import Recorder, RunStore
 
@@ -36,6 +36,7 @@ class Robot:
         self.drive = Drive()
         self.lights = Lights()
         self.imu = IMU()
+        self.climate = Climate()
         self.camera = Camera()
 
         self.flow = OpticalFlow(self.camera)
@@ -60,12 +61,13 @@ class Robot:
         self.flow.start()
         self.detections.start()
         log.info(
-            "robot up: motors=%s imu=%s camera=%s leds=%s flow=%s",
+            "robot up: motors=%s imu=%s camera=%s leds=%s flow=%s climate=%s",
             self.drive.hardware_available,
             self.imu.status()["state"],
             self.camera.available,
             self.lights.available,
             self.flow.available,
+            self.climate.available,
         )
 
     def close(self, reason="shutdown"):
@@ -90,6 +92,7 @@ class Robot:
             ("flow", self.flow.close),
             ("lights", self.lights.close),
             ("imu", self.imu.close),
+            ("climate", self.climate.close),
             ("camera", self.camera.close),
         ):
             try:

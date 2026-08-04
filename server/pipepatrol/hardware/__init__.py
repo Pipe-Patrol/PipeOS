@@ -7,8 +7,9 @@ exception. The server must stay up and stay stoppable no matter what is unplugge
 
 from pipepatrol.hardware import host
 from pipepatrol.hardware.camera import Camera
+from pipepatrol.hardware.climate import Climate
 from pipepatrol.hardware.drive import Drive
 from pipepatrol.hardware.imu import IMU
 from pipepatrol.hardware.lights import Lights
 
-__all__ = ["Camera", "Drive", "IMU", "Lights", "host"]
+__all__ = ["Camera", "Climate", "Drive", "IMU", "Lights", "host"]

@@ -7,12 +7,14 @@ import { ClockIcon } from '@/components/primitives/icons'
 import { DEFECT_GROUPS, DEFECT_TYPES, defectLabel } from '@/constants/defects'
 import * as format from '@/lib/format'
 import type { RobotClient } from '@/robot/client'
-import type { DefectRegion, Motion, Run } from '@/robot/types'
+import type { ClimateReading, DefectRegion, Motion, Run } from '@/robot/types'
 
 interface DefectPanelProps {
   client: RobotClient
   run: Run | null
   motion: Motion
+  /** Stamped onto the defect alongside the chainage. */
+  climate: ClimateReading
   /** Drawn on the live feed, not in here. Null until the operator marks one. */
   region: DefectRegion | null
   /**
@@ -56,6 +58,7 @@ export function DefectPanel({
   client,
   run,
   motion,
+  climate,
   region,
   regionMarkedAt,
   onRegionChange,
@@ -238,8 +241,8 @@ export function DefectPanel({
           />
           <Info label="Distance from entry" value={format.metres(motion.chainage_m)} />
           <Info label="Time logged" value={new Date(now).toLocaleTimeString()} />
-          <Info label="Temperature" value={format.BLANK} />
-          <Info label="Humidity" value={format.BLANK} />
+          <Info label="Temperature" value={format.celsius(climate.temperature_c)} />
+          <Info label="Humidity" value={format.percent(climate.humidity_pct)} />
         </div>
 
         {error && <p className="text-[12px] text-state-fault-signal">{error}</p>}

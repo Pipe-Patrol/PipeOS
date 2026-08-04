@@ -179,6 +179,7 @@ export function ToolPalette({
           client={client}
           run={run}
           motion={telemetry.motion}
+          climate={telemetry.climate}
           region={defectRegion}
           regionMarkedAt={defectRegionMarkedAt}
           onRegionChange={onDefectRegionChange}

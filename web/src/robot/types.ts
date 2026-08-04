@@ -116,6 +116,14 @@ export interface HostStatus {
   storage: { total_bytes: number; free_bytes: number; used_pct: number | null } | null
 }
 
+/** Air temperature and humidity from the DHT on GPIO4. Blank when silent. */
+export interface ClimateReading {
+  quality: Quality
+  available: boolean
+  temperature_c: number | null
+  humidity_pct: number | null
+}
+
 export interface Hazards {
   /** Inferred, not measured — no current sensor. Raises an alert, never stops. */
   stalled: boolean
@@ -172,6 +180,7 @@ export interface Telemetry {
   camera: CameraStatus
   lights: LightsStatus
   host: HostStatus
+  climate: ClimateReading
   hazards: Hazards
   detections: Detection[]
   perception: {

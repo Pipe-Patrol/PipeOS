@@ -75,7 +75,7 @@ export function StatusBar() {
         </StatusBarCell>
 
         <StatusBarCell>
-          <div className={LABEL}>Temperature</div>
+          <div className={LABEL}>CPU temp</div>
           <div className={`${VALUE} text-ink-100`}>
             {format.celsius(telemetry?.host.cpu_temp_c ?? null)}
           </div>
