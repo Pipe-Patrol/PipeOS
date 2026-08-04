@@ -157,12 +157,7 @@ export function LiveRoute() {
   return (
     <div className="flex h-full flex-col bg-ink-1000">
       <section className="relative min-h-0 flex-1">
-        <VideoFeed
-          client={client}
-          zoom={zoom}
-          onZoom={setZoom}
-          stale={link.state !== 'connected'}
-        />
+        <VideoFeed client={client} zoom={zoom} stale={link.state !== 'connected'} />
 
         {telemetry && (
           <>
