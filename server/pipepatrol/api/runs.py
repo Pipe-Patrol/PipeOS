@@ -6,11 +6,16 @@ the same run.
 """
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    Response,
+    StreamingResponse,
+)
 from pydantic import BaseModel, Field
 
 from pipepatrol.api.deps import get_robot
-from pipepatrol.runs import export
+from pipepatrol.runs import export, video as video_module
 from pipepatrol.runs.models import Defect
 
 router = APIRouter(prefix="/api/runs")
@@ -159,6 +164,44 @@ async def get_video(run_id: str, robot=Depends(get_robot)):
     if not path.is_file():
         return JSONResponse({"error": "recording file is missing"}, status_code=404)
     return FileResponse(path, media_type="video/x-motion-jpeg")
+
+
+@router.get("/{run_id}/video.mov")
+async def get_video_mov(run_id: str, robot=Depends(get_robot)):
+    """The recording as a file a laptop will actually open.
+
+    A container rewrite, not a re-encode, streamed straight out rather than
+    written to the card -- see runs/video.py for why both of those matter.
+    """
+    run = robot.store.get(run_id)
+    if run is None or run.recording is None:
+        return JSONResponse({"error": "no recording for that run"}, status_code=404)
+
+    directory = robot.store.run_dir(run_id)
+    path = directory / run.recording.file
+    if not path.is_file():
+        return JSONResponse({"error": "recording file is missing"}, status_code=404)
+    if not video_module.available():
+        return JSONResponse(
+            {"error": "ffmpeg is not installed on the robot"}, status_code=503
+        )
+
+    fps = video_module.recorded_fps(directory / run.recording.index_file)
+    filename = _download_name(run)
+    return StreamingResponse(
+        video_module.remux(path, fps),
+        media_type=video_module.MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _download_name(run):
+    """A filename someone can find again, rather than video.mov in Downloads."""
+    safe = "".join(
+        character if character.isalnum() or character in "-_" else "-"
+        for character in (run.name or "run")
+    ).strip("-")
+    return f"{safe or 'run'}-{run.id}.mov"
 
 
 @router.get("/{run_id}/export.{fmt}")

@@ -47,6 +47,13 @@ export function RunDetailRoute() {
       title={run.name}
       actions={
         <div className="flex gap-2">
+          {/* Only offered when there is something to convert. A download that
+              404s is worse than a button that is not there. */}
+          {run.recording && (
+            <a href={client.mediaUrl(`${base}/video.mov`)} download>
+              <Button variant="quiet">VIDEO</Button>
+            </a>
+          )}
           {(['json', 'csv', 'zip'] as const).map((fmt) => (
             <a key={fmt} href={client.mediaUrl(`${base}/export.${fmt}`)} download>
               <Button variant="quiet">{fmt.toUpperCase()}</Button>
@@ -55,6 +62,10 @@ export function RunDetailRoute() {
         </div>
       }
     >
+      <p className="tnum -mt-1 text-[11px] text-ink-500">
+        ID {run.id} · ~/PipeOS/server/data/runs/{run.id}
+      </p>
+
       {run.interrupted && (
         <p className="rounded-panel border border-state-warning-signal/50 bg-state-warning-signal/10 px-3 py-2 text-[12px] text-state-warning-signal">
           Interrupted
