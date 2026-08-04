@@ -32,10 +32,12 @@ Like every other subsystem here, an absent camera is a supported state: the
 server keeps running and the stream endpoint reports it as unavailable.
 
 TUNING. Brightness and contrast are pushed down to the sensor -- picamera2
-controls, or V4L2 controls -- so they cost nothing per frame. Dehaze cannot be:
-it is a pixel operation, so enabling it starts a worker that decodes, processes
-and re-encodes every frame. That is real CPU on a Pi that is also running flow
-and inference, so it is off by default and the cost is the reason.
+controls, or V4L2 controls -- so they cost nothing per frame. Dehaze and
+sharpening cannot be: they are pixel operations, so switching either on starts a
+worker that decodes, reworks and re-encodes every frame. That is real CPU on a
+Pi already running flow and inference, so both are off by default and the cost
+is the reason. They share one worker, because the JPEG round trip dwarfs either
+operation and paying for it twice would be the actual expense.
 
 MOUNTING. The camera is bolted into the chassis upside down, so every frame is
 turned 180 degrees. That is deliberately a constant and not an operator control:
@@ -60,6 +62,7 @@ import io
 import logging
 import struct
 import threading
+import time
 
 log = logging.getLogger(__name__)
 
@@ -77,11 +80,59 @@ BOUNDARY = "frame"
 RECONNECT_AFTER_FAILURES = 20  # x the 0.1 s read-failure sleep
 RECONNECT_INTERVAL_S = 2.0
 
-# Dehaze is CLAHE on the luminance channel. Pipes are low-contrast and hazy
-# under LED light, and local histogram equalisation is what actually recovers
-# texture there -- a global curve just clips the highlights off the pipe crown.
-DEHAZE_CLIP_LIMIT = 2.5
-DEHAZE_TILE_GRID = (8, 8)
+# --- dehaze ---------------------------------------------------------------
+#
+# The physical model, rather than a contrast trick. Light reaching the camera
+# through a scattering medium is
+#
+#     I(x) = J(x)·t(x) + A·(1 − t(x))
+#
+# where I is what the sensor sees, J the scene we want, A the airlight (here:
+# the robot's own LED backscattered off suspended muck), and t the transmission,
+# falling off with distance. Inverting it gives J = (I − A)/t + A, so the whole
+# problem is estimating A and t.
+#
+# t comes from the dark channel prior (He, Sun & Tang, CVPR 2009): in any
+# haze-free outdoor patch some colour channel is nearly black, so however bright
+# the darkest channel of a patch is, that brightness is the haze. It holds well
+# in a pipe -- wet brick and joints are full of genuinely dark pixels, and where
+# it fails is exactly where there is nothing to see anyway.
+#
+# This replaces CLAHE, which equalised the histogram and called it dehazing. It
+# lifted contrast everywhere including where the haze was thickest, so it
+# amplified backscatter as readily as pipe wall and made distance disappear.
+DEHAZE_OMEGA = 0.95  # leave 5% of haze; removing all of it looks synthetic
+DEHAZE_PATCH = 15  # dark-channel window in pixels, at full resolution
+DEHAZE_T_FLOOR = 0.1  # never divide by less than this or noise explodes
+# Transmission is smooth, so it is estimated small and scaled back up. This is
+# the difference between a filter that keeps up with the camera and one that
+# does not.
+DEHAZE_ESTIMATE_SCALE = 0.25
+DEHAZE_GUIDE_RADIUS = 20  # guided-filter window, on the small image
+DEHAZE_GUIDE_EPS = 1e-3
+DEHAZE_AIRLIGHT_FRACTION = 0.001  # top 0.1% of the dark channel is the airlight
+# A lamp is not airlight. Uncapped, a light source in frame is taken as the haze
+# colour and the whole picture is corrected against it.
+DEHAZE_MAX_AIRLIGHT = 0.95
+# How much haze counts as "fully hazy". The mean of the dark channel is the
+# prior's own estimate of haze thickness, and correcting in proportion to it is
+# what keeps this from mangling a clear frame: measured on this robot, a clear
+# lab frame reads about 0.19 and a properly hazy one about 0.51. Without the
+# scaling the model assumes every bright pixel is haze and crushes the shadows.
+DEHAZE_FULL_HAZE_DENSITY = 0.5
+
+# --- sharpening -----------------------------------------------------------
+#
+# Unsharp mask: subtract a blurred copy to get the detail, then add it back
+# amplified. sharp = image + amount·(image − blur(image)).
+#
+# A blur is a low-pass filter, so image − blur is precisely the high-frequency
+# part, and this is a high-boost filter written in the cheapest possible terms.
+# It is the right tool here because it does not invent edges: it only re-weights
+# detail the lens already resolved, which matters when an operator is deciding
+# whether a hairline mark is a crack.
+SHARPEN_SIGMA = 1.4  # px; roughly the scale of detail worth lifting at 640x480
+SHARPEN_MAX_AMOUNT = 1.5  # what a slider at 1.0 means; beyond this it haloes
 
 # --- V4L2 control queries -------------------------------------------------
 #
@@ -171,21 +222,34 @@ class Tuning:
         self.brightness = 0.0  # -1..1, 0 = untouched
         self.contrast = 0.0  # -1..1, 0 = untouched
         self.dehaze = False
+        self.sharpness = 0.0  # 0..1, 0 = off
 
-    def update(self, brightness=None, contrast=None, dehaze=None):
+    def update(self, brightness=None, contrast=None, dehaze=None, sharpness=None):
         if brightness is not None:
             self.brightness = _clamp_unit(brightness)
         if contrast is not None:
             self.contrast = _clamp_unit(contrast)
         if dehaze is not None:
             self.dehaze = bool(dehaze)
+        if sharpness is not None:
+            self.sharpness = max(0.0, _clamp_unit(sharpness))
         return self
+
+    @property
+    def needs_pixels(self):
+        """True when a frame has to be decoded and reworked to satisfy this.
+
+        Brightness and contrast never appear here: they go to the sensor and
+        cost nothing. These two are what start the worker.
+        """
+        return self.dehaze or self.sharpness > 0
 
     def as_dict(self):
         return {
             "brightness": round(self.brightness, 3),
             "contrast": round(self.contrast, 3),
             "dehaze": self.dehaze,
+            "sharpness": round(self.sharpness, 3),
         }
 
 
@@ -204,6 +268,99 @@ def _apply_mount_rotation(cv2, frame):
     if code is None:
         return frame
     return cv2.rotate(frame, getattr(cv2, code))
+
+
+def _dark_channel(cv2, image, patch):
+    """min over colour, then min over a patch. Erosion *is* a min filter."""
+    darkest_channel = image.min(axis=2)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (patch, patch))
+    return cv2.erode(darkest_channel, kernel)
+
+
+def _estimate_airlight(np, image, dark):
+    """The airlight A, read off the haziest pixels in the picture.
+
+    Haziest means brightest in the dark channel. Among those, the brightest
+    pixel in the image itself is taken rather than the per-channel maximum,
+    which would invent a colour that appears nowhere in the frame.
+    """
+    flat = dark.ravel()
+    count = max(1, int(flat.size * DEHAZE_AIRLIGHT_FRACTION))
+    haziest = np.argpartition(flat, -count)[-count:]
+    candidates = image.reshape(-1, 3)[haziest]
+    return candidates[candidates.sum(axis=1).argmax()]
+
+
+def _guided_filter(cv2, np, guide, target, radius, eps):
+    """Edge-preserving smoothing of `target` under `guide` (He et al., 2010).
+
+    The raw transmission map is blocky, because it is built from patch minima.
+    Smoothing it naively would bleed haze across the edges of anything in the
+    frame and leave halos around every joint; a guided filter follows the
+    picture's own edges instead.
+    """
+    window = (radius, radius)
+    mean_guide = cv2.blur(guide, window)
+    mean_target = cv2.blur(target, window)
+    mean_product = cv2.blur(guide * target, window)
+    mean_square = cv2.blur(guide * guide, window)
+
+    covariance = mean_product - mean_guide * mean_target
+    variance = mean_square - mean_guide * mean_guide
+
+    a = covariance / (variance + eps)
+    b = mean_target - a * mean_guide
+    return cv2.blur(a, window) * guide + cv2.blur(b, window)
+
+
+def dehaze_bgr(cv2, np, frame):
+    """Invert the scattering model on one BGR frame. Returns a new uint8 frame."""
+    height, width = frame.shape[:2]
+    small = cv2.resize(
+        frame, None,
+        fx=DEHAZE_ESTIMATE_SCALE, fy=DEHAZE_ESTIMATE_SCALE,
+        interpolation=cv2.INTER_AREA,
+    )
+    normalised = small.astype(np.float32) / 255.0
+    patch = max(3, int(DEHAZE_PATCH * DEHAZE_ESTIMATE_SCALE) | 1)
+
+    dark = _dark_channel(cv2, normalised, patch)
+    airlight = _estimate_airlight(np, normalised, dark)
+    # Floor: a near-black airlight means there is no haze to model, and dividing
+    # by it would manufacture one. Ceiling: see DEHAZE_MAX_AIRLIGHT.
+    airlight = np.clip(airlight, 1e-3, DEHAZE_MAX_AIRLIGHT)
+
+    # Correct in proportion to how much haze the prior actually finds, so a
+    # clear frame is left nearly alone instead of having its shadows crushed.
+    density = float(dark.mean())
+    omega = DEHAZE_OMEGA * min(1.0, density / DEHAZE_FULL_HAZE_DENSITY)
+
+    # The prior, on the image normalised by the airlight.
+    transmission = 1.0 - omega * _dark_channel(cv2, normalised / airlight, patch)
+    guide = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+    transmission = _guided_filter(
+        cv2, np, guide, transmission, DEHAZE_GUIDE_RADIUS, DEHAZE_GUIDE_EPS
+    )
+
+    transmission = cv2.resize(
+        transmission, (width, height), interpolation=cv2.INTER_LINEAR
+    )
+    transmission = np.clip(transmission, DEHAZE_T_FLOOR, 1.0)[:, :, None]
+
+    scene = (frame.astype(np.float32) / 255.0 - airlight) / transmission + airlight
+    return np.clip(scene * 255.0, 0, 255).astype(np.uint8)
+
+
+def sharpen_bgr(cv2, frame, amount):
+    """Unsharp mask. `amount` is 0..1 from the slider; 0 returns the frame."""
+    if amount <= 0:
+        return frame
+    gain = amount * SHARPEN_MAX_AMOUNT
+    blurred = cv2.GaussianBlur(frame, (0, 0), SHARPEN_SIGMA)
+    # addWeighted rather than raw arithmetic: it saturates at 0 and 255 instead
+    # of wrapping, and a wrapped highlight is a white speck that looks like a
+    # defect.
+    return cv2.addWeighted(frame, 1.0 + gain, blurred, -gain, 0)
 
 
 def _clamp_unit(value):
@@ -505,16 +662,23 @@ class _UsbBackend:
             self._capture = None
 
 
-class _Dehazer:
-    """Decodes, equalises and re-encodes frames. Only runs while dehaze is on.
+class _PixelWorker:
+    """Decodes, reworks and re-encodes frames. Runs only while it has a job.
 
     Deliberately a separate stream rather than an inline filter on the client
     generator: with two consoles open, an inline filter would do the work twice.
+
+    Dehaze and sharpening share this one decode/encode. Doing them in separate
+    workers would pay the expensive part -- the JPEG round trip -- twice to run
+    two operations that each take a fraction of it. Order matters: dehaze first,
+    because sharpening the veil before removing it amplifies the haze's own
+    texture and then subtracts a picture that no longer matches.
     """
 
-    def __init__(self, source, sink):
+    def __init__(self, source, sink, tuning):
         self._source = source
         self._sink = sink
+        self._tuning = tuning
         self._stop = threading.Event()
         self._thread = None
 
@@ -522,7 +686,7 @@ class _Dehazer:
         if self._thread is not None:
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="dehaze", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="pixel-worker", daemon=True)
         self._thread.start()
 
     def stop(self):
@@ -536,30 +700,40 @@ class _Dehazer:
             import cv2
             import numpy as np
         except ImportError as exc:
-            log.warning("dehaze needs OpenCV, which is not installed: %s", exc)
+            log.warning("image processing needs OpenCV, which is absent: %s", exc)
             return
 
-        clahe = cv2.createCLAHE(clipLimit=DEHAZE_CLIP_LIMIT, tileGridSize=DEHAZE_TILE_GRID)
         params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
         seen = None
+        processed = 0
+        spent = 0.0
 
         while not self._stop.is_set():
             frame, seen = self._source.wait_for_frame(timeout=1.0, since=seen)
             if frame is None:
                 continue
+            began = time.monotonic()
             try:
                 image = cv2.imdecode(np.frombuffer(frame, np.uint8), cv2.IMREAD_COLOR)
                 if image is None:
                     continue
-                lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-                lab[:, :, 0] = clahe.apply(lab[:, :, 0])
-                image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+                if self._tuning.dehaze:
+                    image = dehaze_bgr(cv2, np, image)
+                image = sharpen_bgr(cv2, image, self._tuning.sharpness)
                 encoded, buf = cv2.imencode(".jpg", image, params)
             except Exception as exc:  # noqa: BLE001 - never kill the stream over a filter
-                log.warning("dehaze failed on a frame: %s", exc)
+                log.warning("image processing failed on a frame: %s", exc)
                 continue
             if encoded:
                 self._sink.write(buf.tobytes())
+
+            # The docstring claims this costs real CPU. Say how much, so the
+            # claim can be checked on the robot rather than taken on trust.
+            spent += time.monotonic() - began
+            processed += 1
+            if processed % 100 == 0:
+                log.info("image processing: %.0f ms per frame", 1000.0 * spent / processed)
+                processed, spent = 0, 0.0
 
 
 class Camera:
@@ -567,7 +741,7 @@ class Camera:
         self._lock = threading.Lock()
         self._raw = None
         self._processed = None
-        self._dehazer = None
+        self._worker = None
         self._backend = None
         self._error = None
         self._detail = None
@@ -617,28 +791,28 @@ class Camera:
 
     # --- tuning ---
 
-    def set_tuning(self, brightness=None, contrast=None, dehaze=None):
+    def set_tuning(self, brightness=None, contrast=None, dehaze=None, sharpness=None):
         """Apply tuning. Returns the tuning actually in force."""
         with self._lock:
-            self.tuning.update(brightness, contrast, dehaze)
+            self.tuning.update(brightness, contrast, dehaze, sharpness)
             if self._backend is not None:
                 self._backend.apply_tuning(self.tuning)
-            self._sync_dehazer()
+            self._sync_worker()
             return self.tuning.as_dict()
 
-    def _sync_dehazer(self):
+    def _sync_worker(self):
         """Start or stop the pixel worker to match the tuning. Holds _lock."""
-        wanted = self.tuning.dehaze and self._streaming
-        if wanted and self._dehazer is None:
-            self._dehazer = _Dehazer(self._raw, self._processed)
-            self._dehazer.start()
-        elif not wanted and self._dehazer is not None:
-            self._dehazer.stop()
-            self._dehazer = None
+        wanted = self.tuning.needs_pixels and self._streaming
+        if wanted and self._worker is None:
+            self._worker = _PixelWorker(self._raw, self._processed, self.tuning)
+            self._worker.start()
+        elif not wanted and self._worker is not None:
+            self._worker.stop()
+            self._worker = None
 
     def _client_output(self):
-        """The stream clients should read: processed when dehaze is on, else raw."""
-        return self._processed if self._dehazer is not None else self._raw
+        """What clients read: the reworked stream when anything is on, else raw."""
+        return self._processed if self._worker is not None else self._raw
 
     # --- frame access ---
 
@@ -656,12 +830,25 @@ class Camera:
 
     def frames(self):
         """Yield multipart MJPEG chunks. Ends cleanly if the camera goes away."""
-        output = self._client_output()
-        if not self._streaming or output is None:
+        if not self._streaming:
             return
 
+        output = None
         seen = None
         while self._streaming:
+            # Re-read the source each time round rather than binding it once.
+            # An MJPEG <img> holds one connection for as long as the console is
+            # open, so a generator that picked its output at the start could
+            # never show a dehaze toggle: the operator flipped the switch and
+            # nothing happened, for the lifetime of the page.
+            current = self._client_output()
+            if current is None:
+                return
+            if current is not output:
+                # Sequence numbers are per-output, so a carried-over `seen` from
+                # the other stream would either skip frames or block.
+                output, seen = current, None
+
             frame, seen = output.wait_for_frame(since=seen)
             if frame is None:
                 log.warning(
@@ -692,9 +879,9 @@ class Camera:
             if not self._streaming:
                 return
             self._streaming = False
-            if self._dehazer is not None:
-                self._dehazer.stop()
-                self._dehazer = None
+            if self._worker is not None:
+                self._worker.stop()
+                self._worker = None
             # Wake any reader blocked on the condition so generators can exit.
             for output in (self._raw, self._processed):
                 if output is not None:

@@ -18,6 +18,7 @@ class TuningRequest(BaseModel):
     brightness: float | None = Field(default=None, ge=-1.0, le=1.0)
     contrast: float | None = Field(default=None, ge=-1.0, le=1.0)
     dehaze: bool | None = None
+    sharpness: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 @router.get("/api/camera")
@@ -38,7 +39,10 @@ async def get_camera(robot=Depends(get_robot)):
 
 @router.post("/api/camera/tuning")
 async def post_tuning(payload: TuningRequest, robot=Depends(get_robot)):
-    """Brightness and contrast go to the sensor. Dehaze starts a pixel worker.
+    """Brightness and contrast go to the sensor. Dehaze and sharpening do not.
+
+    Those two share a worker that decodes and re-encodes every frame, so either
+    one switched on costs CPU; both together cost barely more than one.
 
     Orientation is deliberately not here: the 180 degree turn is a fixed
     correction for how the camera is mounted, not something to adjust mid-run.
@@ -47,6 +51,7 @@ async def post_tuning(payload: TuningRequest, robot=Depends(get_robot)):
         brightness=payload.brightness,
         contrast=payload.contrast,
         dehaze=payload.dehaze,
+        sharpness=payload.sharpness,
     )
     return {"ok": True, "tuning": tuning}
 

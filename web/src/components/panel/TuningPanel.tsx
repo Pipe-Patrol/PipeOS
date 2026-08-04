@@ -8,6 +8,7 @@ interface TuningPanelProps {
     brightness?: number
     contrast?: number
     dehaze?: boolean
+    sharpness?: number
   }) => void
   onClose: () => void
 }
@@ -16,9 +17,10 @@ interface TuningPanelProps {
  * Image adjustments.
  *
  * Brightness and contrast are pushed down to the sensor, so they are free.
- * Dehaze cannot be — it is a pixel operation, so enabling it starts a worker
- * that decodes, equalises and re-encodes every frame. That is why it is off by
- * default and why the frame rate drops while it is on.
+ * Dehaze and Sharpness are not — they are pixel operations, so either one
+ * starts a worker on the robot that decodes, reworks and re-encodes every
+ * frame. That is why both are off by default and why the frame rate drops while
+ * they are on. They share the worker, so the second one costs almost nothing.
  *
  * There is no rotate or flip here, deliberately. The camera is mounted upside
  * down and the robot turns every frame 180° at the source, so the picture is
@@ -53,6 +55,17 @@ export function TuningPanel({ camera, onChange, onClose }: TuningPanelProps) {
           disabled={!available}
         />
 
+        <Slider
+          label="Sharpness"
+          value={tuning.sharpness}
+          min={0}
+          max={1}
+          step={0.05}
+          display={tuning.sharpness < 0.005 ? 'off' : tuning.sharpness.toFixed(2)}
+          onChange={(sharpness) => onChange({ sharpness })}
+          disabled={!available}
+        />
+
         <label
           className={`flex items-center gap-2 text-[12px] text-ink-400 ${
             available ? '' : 'opacity-40'
@@ -70,7 +83,9 @@ export function TuningPanel({ camera, onChange, onClose }: TuningPanelProps) {
 
         <button
           type="button"
-          onClick={() => onChange({ brightness: 0, contrast: 0, dehaze: false })}
+          onClick={() =>
+            onChange({ brightness: 0, contrast: 0, dehaze: false, sharpness: 0 })
+          }
           className="self-start rounded-sm border border-ink-800 px-2 py-1 text-[11px] text-ink-400 hover:bg-white/10 hover:text-ink-100"
         >
           Reset

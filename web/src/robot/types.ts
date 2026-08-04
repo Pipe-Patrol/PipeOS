@@ -89,7 +89,14 @@ export interface CameraStatus {
    * correct how the camera is mounted, before anything downstream sees it — so
    * there is nothing here to set and nothing for the console to undo.
    */
-  tuning: { brightness: number; contrast: number; dehaze: boolean }
+  tuning: {
+    brightness: number
+    contrast: number
+    /** Both of these run a pixel worker on the robot; the sensor controls do not. */
+    dehaze: boolean
+    /** 0..1. Unsharp-mask amount; 0 is off. */
+    sharpness: number
+  }
   error: string | null
 }
 

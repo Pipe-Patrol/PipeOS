@@ -1,7 +1,9 @@
-"""The camera's two historical failure modes, pinned down.
+"""The camera's historical failure modes, pinned down.
 
-Both of these shipped once, both were invisible from the console, and both are
-cheap to assert. Neither test needs a camera, picamera2 or OpenCV.
+Each of these shipped once and each was invisible from the console. No test here
+needs a camera or picamera2; the dehaze ones need OpenCV and numpy, and skip
+without them, because checking a physical model against a synthetic hazy frame
+is worth more than asserting which functions got called.
 """
 
 import sys
@@ -10,6 +12,11 @@ import types
 import pytest
 
 from pipepatrol.hardware import camera as camera_module
+from pipepatrol.hardware.camera import (
+    _dark_channel as _dark_channel_fn,
+    _estimate_airlight as _estimate_airlight_fn,
+    dehaze_bgr,
+)
 
 
 def _fake_picamera2(camera_info):
@@ -153,7 +160,12 @@ def test_status_reports_tuning():
     """The console's CameraStatus type requires these keys, and only these."""
     camera = camera_module.Camera(autostart=False)
     status = camera.status()
-    assert status["tuning"] == {"brightness": 0.0, "contrast": 0.0, "dehaze": False}
+    assert status["tuning"] == {
+        "brightness": 0.0,
+        "contrast": 0.0,
+        "dehaze": False,
+        "sharpness": 0.0,
+    }
     assert status["available"] is False
 
 
@@ -310,10 +322,203 @@ def test_the_scan_is_fresh_rather_than_the_remembered_index(monkeypatch):
     assert backend._index == 7
 
 
+# --- dehaze ---------------------------------------------------------------
+#
+# The model is I = J·t + A·(1−t), so the honest test is to synthesise a hazy
+# frame from a known clean one and check the filter moves it back.
+
+cv2 = pytest.importorskip("cv2")
+np = pytest.importorskip("numpy")
+
+
+def _scene(size=240):
+    """A clean frame with real structure and genuinely dark pixels.
+
+    Blurred on purpose. Per-pixel noise is not what a camera produces, and the
+    dark channel prior is a statement about *patches* — testing it against
+    salt-and-pepper would be testing it on input it never sees and tuning the
+    constants against a fiction.
+    """
+    rng = np.random.default_rng(7)
+    image = rng.integers(0, 60, (size, size, 3), dtype=np.uint8)
+    image[:, size // 2 :] = rng.integers(150, 255, (size, size // 2, 3))
+    image[size // 3 : size // 2, :] = 10
+    return cv2.GaussianBlur(image, (0, 0), 4)
+
+
+def _add_haze(clean, transmission, airlight=(200, 200, 200)):
+    """Apply the forward model, so the test knows the true answer."""
+    j = clean.astype(np.float32)
+    a = np.array(airlight, dtype=np.float32)
+    hazy = j * transmission + a * (1.0 - transmission)
+    return np.clip(hazy, 0, 255).astype(np.uint8)
+
+
+def _contrast(image):
+    return float(image.astype(np.float32).std())
+
+
+def test_haze_destroys_contrast_and_dehazing_gives_it_back():
+    """The whole point, stated as a number."""
+    clean = _scene()
+    hazy = _add_haze(clean, transmission=0.4)
+
+    assert _contrast(hazy) < _contrast(clean), "the synthetic haze must flatten it"
+
+    recovered = dehaze_bgr(cv2, np, hazy)
+    assert _contrast(recovered) > _contrast(hazy) * 1.2
+
+
+def test_dehazing_moves_the_frame_back_towards_the_original():
+    """Not just 'more contrast' — closer to the actual scene."""
+    clean = _scene()
+    hazy = _add_haze(clean, transmission=0.5)
+
+    before = np.abs(hazy.astype(np.float32) - clean.astype(np.float32)).mean()
+    after = np.abs(
+        dehaze_bgr(cv2, np, hazy).astype(np.float32) - clean.astype(np.float32)
+    ).mean()
+    assert after < before, f"error rose: {before:.1f} -> {after:.1f}"
+
+
+def test_thicker_haze_is_lifted_further():
+    """Transmission is estimated, not assumed — heavier haze, bigger correction."""
+    clean = _scene()
+    light = _add_haze(clean, transmission=0.8)
+    heavy = _add_haze(clean, transmission=0.3)
+
+    def lift(hazy):
+        return _contrast(dehaze_bgr(cv2, np, hazy)) - _contrast(hazy)
+
+    assert lift(heavy) > lift(light)
+
+
+def test_a_clear_frame_is_left_close_to_alone():
+    """No haze to remove means little to do. CLAHE could not tell the difference."""
+    clean = _scene()
+    out = dehaze_bgr(cv2, np, clean)
+    shift = np.abs(out.astype(np.float32) - clean.astype(np.float32)).mean()
+    # Half this scene is near-white, which reads as thick haze to the prior, so
+    # it is a harder case than real footage: the same measurement on a frame off
+    # the robot moved by about 4 levels. 15 catches a regression without pinning
+    # the constants to a fixture.
+    assert shift < 15, f"a clear frame was altered by {shift:.1f} levels"
+
+
+def test_a_clear_frame_does_not_have_its_shadows_crushed():
+    """The failure that made this unusable on real footage.
+
+    Uncorrected, the prior reads every bright pixel as haze, so a frame with a
+    window or a lamp in it gets corrected against that and the dark end is
+    pushed below black. Measured on the robot it took 5% of pixels to 11%.
+    """
+    clean = _scene()
+    before = float((clean == 0).mean())
+    after = float((dehaze_bgr(cv2, np, clean) == 0).mean())
+    assert after <= before + 0.05, f"clipped to black {before:.1%} -> {after:.1%}"
+
+
+def test_the_correction_scales_with_how_much_haze_there_is():
+    """Haze density is measured, not assumed — that is what protects clear frames."""
+    clean = _scene()
+
+    def shift(image):
+        out = dehaze_bgr(cv2, np, image)
+        return float(np.abs(out.astype(np.float32) - image.astype(np.float32)).mean())
+
+    assert shift(_add_haze(clean, 0.35)) > shift(clean) * 3
+
+
+def test_a_lamp_in_frame_is_not_taken_as_airlight():
+    """Airlight is capped: a light source is not the colour of the haze."""
+    scene = _scene()
+    scene[:12, :12] = 255  # a small blown-out highlight
+    out = dehaze_bgr(cv2, np, scene)
+    assert np.isfinite(out.astype(np.float32)).all()
+    assert out.mean() > scene.mean() * 0.6, "one highlight must not darken everything"
+
+
+def test_output_is_a_valid_frame():
+    out = dehaze_bgr(cv2, np, _add_haze(_scene(), 0.5))
+    assert out.dtype == np.uint8
+    assert out.shape == (240, 240, 3)
+    assert out.min() >= 0 and out.max() <= 255
+
+
+def test_transmission_floor_survives_an_all_white_frame():
+    """Pure white is t -> 0; without the floor this divides by ~0 and blows up."""
+    white = np.full((120, 120, 3), 255, dtype=np.uint8)
+    out = dehaze_bgr(cv2, np, white)
+    assert np.isfinite(out.astype(np.float32)).all()
+
+
+def test_dark_channel_is_the_patch_minimum():
+    image = np.ones((40, 40, 3), dtype=np.float32)
+    image[20, 20] = [0.0, 0.5, 0.5]  # one dark pixel in the blue channel
+    dark = _dark_channel_fn(cv2, image, 5)
+    assert dark[20, 20] == pytest.approx(0.0)
+    assert dark[0, 0] == pytest.approx(1.0), "far from it, nothing is dark"
+
+
+def test_airlight_comes_from_the_haziest_region():
+    """A is read off the haze, not off a bright object in the clear."""
+    image = np.zeros((60, 60, 3), dtype=np.float32)
+    image[:30] = 0.85  # a hazy band: bright in every channel
+    dark = _dark_channel_fn(cv2, image, 5)
+    airlight = _estimate_airlight_fn(np, image, dark)
+    assert airlight == pytest.approx([0.85, 0.85, 0.85], abs=0.02)
+
+
+def test_sharpening_only_starts_the_worker_when_asked():
+    """Brightness must never drag in a decode; sharpening and dehaze must."""
+    tuning = camera_module.Tuning()
+    assert tuning.needs_pixels is False
+    tuning.update(brightness=1.0, contrast=-1.0)
+    assert tuning.needs_pixels is False, "sensor controls must stay free"
+    tuning.update(sharpness=0.5)
+    assert tuning.needs_pixels is True
+
+
+def test_sharpness_is_zero_to_one():
+    """Negative would be a blur, which nobody asked for and nothing exposes."""
+    tuning = camera_module.Tuning()
+    tuning.update(sharpness=-3.0)
+    assert tuning.sharpness == 0.0
+    tuning.update(sharpness=9.0)
+    assert tuning.sharpness == 1.0
+
+
+def test_sharpening_at_zero_returns_the_frame_untouched():
+    frame = _scene()
+    assert camera_module.sharpen_bgr(cv2, frame, 0.0) is frame
+
+
+def test_sharpening_lifts_detail():
+    """More local contrast, and monotonically with the slider."""
+    soft = cv2.GaussianBlur(_scene(), (0, 0), 3)
+
+    def detail(image):
+        return float(cv2.Laplacian(image, cv2.CV_32F).var())
+
+    gentle = camera_module.sharpen_bgr(cv2, soft, 0.4)
+    strong = camera_module.sharpen_bgr(cv2, soft, 1.0)
+    assert detail(gentle) > detail(soft)
+    assert detail(strong) > detail(gentle)
+
+
+def test_sharpening_saturates_rather_than_wrapping():
+    """A wrapped highlight is a white speck that reads as a defect."""
+    frame = np.full((60, 60, 3), 250, dtype=np.uint8)
+    frame[20:40, 20:40] = 5
+    out = camera_module.sharpen_bgr(cv2, frame, 1.0)
+    assert out.dtype == np.uint8
+    assert out.max() <= 255 and out.min() >= 0
+
+
 def test_orientation_is_not_reachable_through_tuning():
     """The whole point of making it fixed: no request can turn it off."""
     tuning = camera_module.Tuning()
     tuning.update(brightness=0.5)
-    assert set(tuning.as_dict()) == {"brightness", "contrast", "dehaze"}
+    assert set(tuning.as_dict()) == {"brightness", "contrast", "dehaze", "sharpness"}
     for absent in ("rotate", "flip_h", "flip_v"):
         assert not hasattr(tuning, absent)
