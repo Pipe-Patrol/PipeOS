@@ -16,9 +16,8 @@ interface ZoomControlProps {
  * Digital zoom, controlled on the frame itself rather than from a panel.
  *
  * It sits on the video because that is where the operator is looking, and it
- * mirrors the map in the opposite corner. This is the only way to zoom: the feed
- * deliberately ignores the scroll wheel, because a trackpad pinch is
- * indistinguishable from the browser's own page zoom. See VideoFeed.
+ * mirrors the map in the opposite corner. Pinch- and scroll-to-zoom live on the
+ * feed; this is the visible, touch-reachable version of the same control.
  */
 export function ZoomControl({ zoom, onZoom }: ZoomControlProps) {
   return (
