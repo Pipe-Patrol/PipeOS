@@ -47,27 +47,23 @@ ssh access to the Pi and the Pi's apt packages — see
 
 ### Coming back from a fresh SD card
 
-```bash
-sudo apt update
-sudo apt install -y python3-opencv python3-picamera2 python3-gpiozero \
-                    python3-lgpio i2c-tools
+First, ssh into the Raspberry Pi using ```ssh pipepatrol@pipepatrol.local```
 
-# I2C for the IMU. `do_i2c 0` enables it — 0 is on, which reads backwards.
-# The baudrate is the BNO085 clock-stretching workaround; setting it now saves
-# a second reboot when the IMU turns out to need it, which it will.
+Turning on the **camera**:
+```
+sudo apt install -y python3-opencv
+sudo systemctl restart pipepatrol
+```
+
+Turning on the **IMU**:
+```
+sudo apt install -y python3-opencv
 sudo raspi-config nonint do_i2c 0
-grep -q i2c_arm_baudrate /boot/firmware/config.txt || \
-  echo "dtparam=i2c_arm_baudrate=50000" | sudo tee -a /boot/firmware/config.txt
-
 sudo reboot
 ```
-```bash
-./deploy.sh pipepatrol@pipepatrol.local
-ssh pipepatrol@pipepatrol.local 'journalctl -u pipepatrol -b | grep "robot up"'
-```
-```
-robot up: motors=True imu=absent camera=True leds=True flow=True climate=False
-```
+
+Turning on the **climate**:
+
 
 ## 3. Drive the robot
 
