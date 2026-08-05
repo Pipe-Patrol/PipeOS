@@ -10,6 +10,7 @@ import { Walkthrough, hasSeenWalkthrough } from '@/components/live/Walkthrough'
 import { ZoomControl } from '@/components/live/ZoomControl'
 import { PipeMap } from '@/components/map/PipeMap'
 import { AlertBanner } from '@/components/overlay/AlertBanner'
+import { ProfileStrip } from '@/components/profile/ProfileStrip'
 import { DetectionBoxes } from '@/components/overlay/DetectionBoxes'
 import { DirectionArrow } from '@/components/overlay/DirectionArrow'
 import { TelemetryOverlay } from '@/components/overlay/TelemetryOverlay'
@@ -25,9 +26,10 @@ import type { DefectRegion, Run } from '@/robot/types'
 /**
  * The driving screen.
  *
- * The video is the floor and everything else floats on top of it. No panel
- * takes layout space away from the frame, because down a pipe the frame is the
- * only thing the operator can actually see with.
+ * The video is the floor and everything else floats on top of it, because down
+ * a pipe the frame is the only thing the operator can actually see with. The
+ * profile strip is the sole exception: 28 px of docked height, in exchange for
+ * never covering pipe wall with the answer to "have I already surveyed this?".
  *
  * There is no on-screen d-pad. Driving is keyboard or gamepad, and the only
  * trace of a command is a transient arrow — a control that took a corner of the
@@ -378,6 +380,16 @@ export function LiveRoute() {
           />
         )}
       </section>
+
+      {/* Only while a run is open. With no run there is no chainage that means
+          anything, and an axis of zeroes would be decoration. */}
+      {telemetry?.run.active && (
+        <ProfileStrip
+          client={client}
+          run={run}
+          chainage_m={telemetry.motion.chainage_m}
+        />
+      )}
 
       {preflight && (
         <Preflight
