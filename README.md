@@ -62,9 +62,6 @@ sudo raspi-config nonint do_i2c 0
 sudo reboot
 ```
 
-Turning on the **climate**:
-
-
 ## 3. Drive the robot
 
 Open this on any device on the same network — laptop, phone, iPad:
