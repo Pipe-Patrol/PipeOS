@@ -1,0 +1,14 @@
+# Lets the PipeOS server halt the Pi from the console, and lets it do nothing
+# else. The console's shutdown button ends the run, flushes to the card and then
+# powers off properly — which is the whole point, because flipping the switch
+# instead is what corrupts the SD card.
+#
+# deploy.sh installs this to /etc/sudoers.d/pipepatrol-poweroff, rewriting the
+# user to whichever account the deploy actually ran as. One command, no
+# arguments, no shell: the server can stop the Pi and cannot do anything more.
+#
+# Both paths are listed because sudo matches the command as a literal string.
+# Debian's usrmerge makes /sbin a symlink to /usr/sbin, so `which poweroff`
+# returns whichever the service PATH hits first — and a rule naming only the
+# other one silently fails to match, which reads as "no permission to halt".
+pipepatrol ALL=(root) NOPASSWD: /sbin/poweroff, /usr/sbin/poweroff

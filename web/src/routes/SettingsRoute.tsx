@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 
 import { Page } from '@/components/shell/Page'
 import { Button } from '@/components/primitives/Button'
+import { PoweredOff, ShutdownDialog } from '@/components/shell/ShutdownDialog'
 import * as format from '@/lib/format'
 import { useRobot } from '@/robot/RobotProvider'
 
@@ -16,11 +18,25 @@ const WALKTHROUGH_KEY = 'pipepatrol.walkthroughDismissed'
  */
 export function SettingsRoute() {
   const { client, health, telemetry, disconnect } = useRobot()
+  const [confirming, setConfirming] = useState(false)
+  const [halted, setHalted] = useState(false)
+
+  // Checked before the client guard on purpose. Halting clears the client, and
+  // being bounced to the connect picker mid-shutdown would take away the one
+  // instruction that keeps the card intact.
+  if (halted) return <PoweredOff />
 
   if (!client) return <Navigate to="/connect" replace />
 
   return (
-    <Page title="Settings" actions={<Button onClick={disconnect}>Disconnect</Button>}>
+    <Page
+      title="Settings"
+      actions={
+        <Button variant="danger" onClick={() => setConfirming(true)}>
+          Shut down
+        </Button>
+      }
+    >
       <section className="panel p-4">
         <h2 className="label mb-3">Robot</h2>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
@@ -94,6 +110,26 @@ export function SettingsRoute() {
           Show walkthrough again
         </Button>
       </section>
+
+      {confirming && (
+        <ShutdownDialog
+          client={client}
+          runActive={telemetry?.run.active ?? false}
+          onCancel={() => setConfirming(false)}
+          onDisconnect={() => {
+            setConfirming(false)
+            disconnect()
+          }}
+          onHalted={() => {
+            setConfirming(false)
+            setHalted(true)
+            // Stop the client reconnecting to a Pi that is on its way down —
+            // otherwise the banner spends the next minute claiming the link
+            // failed, which reads as a fault rather than a shutdown.
+            disconnect()
+          }}
+        />
+      )}
     </Page>
   )
 }
