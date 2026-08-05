@@ -33,7 +33,8 @@ wired**, so there is no battery telemetry. See below.
 sudo apt update
 sudo apt install -y python3-picamera2 python3-gpiozero python3-lgpio \
                     python3-opencv python3-venv i2c-tools git
-sudo raspi-config          # Interface Options → I2C → Yes
+sudo raspi-config nonint do_i2c 0   # I2C on, for the IMU. 0 means on.
+sudo reboot
 ```
 
 `python3-opencv` is needed for USB cameras *and* for the optical-flow odometry.
