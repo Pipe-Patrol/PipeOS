@@ -47,10 +47,6 @@ ssh access to the Pi and the Pi's apt packages — see
 
 ### Coming back from a fresh SD card
 
-`deploy.sh` installs the Python packages but not the apt ones, so a newly
-flashed Pi comes up with the server running and every device reported absent.
-Run these **on the Pi** once, before deploying:
-
 ```bash
 sudo apt update
 sudo apt install -y python3-opencv python3-picamera2 python3-gpiozero \
@@ -65,29 +61,13 @@ grep -q i2c_arm_baudrate /boot/firmware/config.txt || \
 
 sudo reboot
 ```
-
-`python3-opencv` is the one that is easy to miss. It drives **USB cameras and
-the optical-flow odometry**, and without it a working USB camera still reports
-`no camera` — the CSI backend correctly declines a USB device, and the USB
-backend has nothing to open it with. It pulls in ~500 MB of dependencies, so it
-looks optional and is not.
-
-Then deploy from your computer and confirm every device came up:
-
 ```bash
 ./deploy.sh pipepatrol@pipepatrol.local
 ssh pipepatrol@pipepatrol.local 'journalctl -u pipepatrol -b | grep "robot up"'
 ```
-
-That line names every subsystem, and is the fastest way to see what is missing:
-
 ```
 robot up: motors=True imu=absent camera=True leds=True flow=True climate=False
 ```
-
-`climate=False` is normal unless the DHT is fitted. Anything else `False` or
-`absent` means that device did not come up — grep the log for its name to get
-the reason.
 
 ## 3. Drive the robot
 
@@ -142,63 +122,6 @@ ssh pipepatrol@pipepatrol.local 'journalctl -u pipepatrol -f'       # watch the 
 ssh pipepatrol@pipepatrol.local 'journalctl -u pipepatrol -b | grep -i camera'
 curl -s http://pipepatrol.local:8000/api/telemetry | python3 -m json.tool | grep -A8 '"camera"'
 ```
-
-#### `camera=False`
-
-```bash
-rpicam-hello --list-cameras     # empty is normal for a USB camera
-ls -l /dev/video*               # a USB camera should be here
-sudo apt install -y python3-opencv && sudo systemctl restart pipepatrol
-```
-
-A USB camera needs `python3-opencv`, not `picamera2`. `No cameras available!`
-from `rpicam-hello` is expected and harmless with a USB camera — libcamera only
-speaks for the CSI bus.
-
-#### `imu=absent`
-
-**On a freshly flashed card this is I²C being switched off, every time.** The
-sensor is fine; the bus does not exist yet. Fix and reboot:
-
-```bash
-sudo raspi-config nonint do_i2c 0    # 0 means on, which reads backwards
-sudo reboot
-```
-
-If it is not that, the BNO085 sits at I²C address `0x4A`. Ask the bus first,
-because that separates wiring from software:
-
-```bash
-i2cdetect -y 1                  # expect 4a
-ssh pipepatrol@pipepatrol.local 'journalctl -u pipepatrol -b | grep -i imu'
-```
-
-- **`Could not open file /dev/i2c-1`** — I²C is off; the device node does not
-  exist yet. This is the normal state after a fresh flash. Enable it and
-  reboot: `sudo raspi-config nonint do_i2c 0` (0 means on), or `raspi-config` →
-  Interface Options → I2C → Yes.
-- **`4a` present but the log still says absent** — the Python side. The driver
-  is pip-installed by `deploy.sh`, so check it imports:
-  `~/PipeOS/server/.venv/bin/python -c "import board; print('ok')"`. If that
-  fails, the venv lost `--system-site-packages`; `rm -rf ~/PipeOS/server/.venv`
-  and deploy again.
-- **`4a` present and intermittent `OSError` in the log** — clock stretching.
-  This chip needs a slower bus than the Pi's default. Add to
-  `/boot/firmware/config.txt` and reboot:
-
-  ```
-  dtparam=i2c_arm=on
-  dtparam=i2c_arm_baudrate=50000
-  ```
-
-- **Still nothing** — it is the Qwiic cable on physical pins 1, 3, 5, 9.
-
-The robot drives fine without the IMU, and **distance is unaffected** — that
-comes from duty and optical flow, and IMU acceleration is deliberately not
-integrated for it (the error grows with the square of time). What you lose is
-the pitch/yaw readout on the video, the tilt reading in the report, and the
-odometry's independent check on whether the robot is actually still. See
-[docs/HARDWARE.md](docs/HARDWARE.md).
 
 ### Project structure
 
