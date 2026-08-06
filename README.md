@@ -24,14 +24,15 @@ robot by team PipePatrol.
 
 ```bash
 gh repo clone Pipe-Patrol/PipeOS
-cd PipeOS
 ```
 
 ## 2. Install it on the robot
 
 Builds the console and sets everything up on the Pi over ssh.
+Wait at least 20 seconds after turning on the rover before running the deploy command below.
 
 ```bash
+cd PipeOS
 ./deploy.sh pipepatrol@pipepatrol.local
 ```
 
@@ -45,7 +46,9 @@ Run this once to set the Pi up, and again whenever the code changes. It needs
 ssh access to the Pi and the Pi's apt packages — see
 [docs/HARDWARE.md](docs/HARDWARE.md).
 
-### Coming back from a fresh SD card
+### If using a newly flashed SD card
+
+If you have just reflashed the microSD card, the camera, IMU, and climate will not work. Follow the steps below. Else, skip to step 3.
 
 First, ssh into the Raspberry Pi using ```ssh pipepatrol@pipepatrol.local```
 
@@ -62,6 +65,12 @@ sudo raspi-config nonint do_i2c 0
 sudo reboot
 ```
 
+Turning on the **climate**:
+
+
+Once finished, open a new terminal, and repeat the first code block in this step (Step 2).
+
+
 ## 3. Drive the robot
 
 Open this on any device on the same network — laptop, phone, iPad:
@@ -71,6 +80,8 @@ http://pipepatrol.local:8000
 ```
 
 Confirm the robot, press **Continue**, and you are in.
+
+**IMPORTANT**: When finished, always shut down the Pi in the GUI (settings > shutdown) or terminal before turning the robot off. Otherwise, the SD card will become corrupted, and reflashing will be required on the next start.
 
 ---
 
