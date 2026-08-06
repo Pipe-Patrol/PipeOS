@@ -13,12 +13,12 @@ robot by team PipePatrol.
 
 ### Features
 
-- **Live video** — low-latency MJPEG feed from the robot's camera.
-- **Real-time telemetry** — orientation, motion, temperature, humidity.
-- **Defect detection** — on-board ML flags cracks, roots, and other defects.
-- **Map and flags** — robot path on a map with auto RTH and defect flagging.
-- **Runs & reports** — snapshots, defect logs, and video recorded to the Pi.
-- **Driving** — keyboard or gamepad.
+- **Live video**: low-latency MJPEG feed from the robot's camera.
+- **Real-time telemetry**: orientation, motion, temperature, humidity.
+- **Defect detection**: on-board ML flags cracks, roots, and other defects.
+- **Map and flags**: robot path on a map with auto RTH and defect flagging.
+- **Runs & reports**: snapshots, defect logs, and video recorded to the Pi.
+- **Driving**: keyboard or gamepad.
 
 ## 1. Get the code
 
@@ -47,7 +47,7 @@ Name not resolving? Use the Pi's IP instead:
 ```
 
 Run this once to set the Pi up, and again whenever the code changes. It needs
-ssh access to the Pi and the Pi's apt packages — see
+ssh access to the Pi and the Pi's apt packages: see
 [docs/HARDWARE.md](docs/HARDWARE.md).
 
 ### If coming from a newly flashed SD card
@@ -82,7 +82,7 @@ Once finished, open a new terminal, and repeat the first code block in this step
 
 ## 3. Drive the robot
 
-Open this on any device on the same network — laptop, phone, iPad:
+Open this on any device on the same network: laptop, phone, iPad:
 
 ```
 http://pipepatrol.local:8000
