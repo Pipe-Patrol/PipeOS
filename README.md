@@ -22,6 +22,8 @@ robot by team PipePatrol.
 
 ## 1. Get the code
 
+Install [Git](https://git-scm.com/install/windows) and [Github CLI](https://cli.github.com/) if you have not yet, and authenticate with ```gh auth login```.
+
 ```bash
 gh repo clone Pipe-Patrol/PipeOS
 ```
@@ -46,10 +48,9 @@ Run this once to set the Pi up, and again whenever the code changes. It needs
 ssh access to the Pi and the Pi's apt packages — see
 [docs/HARDWARE.md](docs/HARDWARE.md).
 
-### If using a newly flashed SD card
+### If coming from a newly flashed SD card
 
-If you have just reflashed the microSD card, the camera, IMU, and climate will not work. Follow the steps below. Else, skip to step 3.
-
+If you just reflashed your microSD card, complete the setup steps below before continuing; otherwise, skip directly to step 3.
 First, ssh into the Raspberry Pi using ```ssh pipepatrol@pipepatrol.local```
 
 Turning on the **camera**:
