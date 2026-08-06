@@ -37,6 +37,7 @@ function run(defects: Defect[], snapshots: Snapshot[]): Run {
     ended_at: null,
     duration_s: 0,
     distance_m: 0,
+    origin: null,
     uncertainty_m: 0,
     interrupted: false,
     note: '',

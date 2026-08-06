@@ -13,9 +13,10 @@ interface MarkerCardProps {
 /**
  * What one marker on the profile actually is.
  *
- * Every chainage in here carries its uncertainty, for the same reason the run
- * detail page does: the strip positions a marker to the pixel, and a pixel is a
- * far more confident claim than the estimate behind it. The ± is the correction.
+ * Chainages are shown plain. The strip positions a marker to the pixel, which
+ * is a far more confident claim than the estimate behind it -- the honesty about
+ * that lives in the `estimated` badge on the readout, not in a margin on every
+ * number.
  */
 export function MarkerCard({ marker, run, client }: MarkerCardProps) {
   const { defect } = marker
@@ -36,7 +37,7 @@ export function MarkerCard({ marker, run, client }: MarkerCardProps) {
         </span>
         <span className="label tnum">
           {defect
-            ? format.metresWithError(defect.chainage_m, defect.chainage_uncertainty_m)
+            ? format.metres(defect.chainage_m)
             : format.metres(marker.chainage_m)}
         </span>
       </div>

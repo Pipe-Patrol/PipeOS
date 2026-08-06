@@ -24,7 +24,7 @@ import threading
 import time
 
 from pipepatrol import config
-from pipepatrol.runs.models import Defect, Run, Snapshot
+from pipepatrol.runs.models import Defect, Origin, Run, Snapshot
 
 log = logging.getLogger(__name__)
 
@@ -88,9 +88,13 @@ class RunStore:
 
     # --- writing ---
 
-    def create(self, name=""):
+    def create(self, name="", origin=None):
         with self._lock:
-            run = Run(name=name or _default_name())
+            # Callers hand this in as a plain dict off the wire; normalise here
+            # so nothing downstream has to check which shape it got.
+            if isinstance(origin, dict):
+                origin = Origin.from_dict(origin)
+            run = Run(name=name or _default_name(), origin=origin)
             directory = self.run_dir(run.id)
             (directory / SNAPSHOT_DIR).mkdir(parents=True, exist_ok=True)
             self._write(run)

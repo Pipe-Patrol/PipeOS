@@ -7,8 +7,6 @@ import type { RobotClient } from '@/robot/client'
 
 interface ShutdownDialogProps {
   client: RobotClient
-  /** True while a run is open, so the dialog can say what it is about to close. */
-  runActive: boolean
   onCancel: () => void
   /** Browser-side only: leave the robot running and go back to the picker. */
   onDisconnect: () => void
@@ -27,7 +25,6 @@ interface ShutdownDialogProps {
  */
 export function ShutdownDialog({
   client,
-  runActive,
   onCancel,
   onDisconnect,
   onHalted,
@@ -56,31 +53,9 @@ export function ShutdownDialog({
         </div>
 
         <p className="mt-2 text-[13px] text-ink-200">
-          This powers the Pi off. It does not just disconnect this console.
-        </p>
-
-        <ul className="mt-4 flex flex-col gap-1.5 text-[13px] text-ink-300">
-          {[
-            'Stops the motors',
-            runActive
-              ? 'Ends the run in progress and saves it properly'
-              : 'Flushes anything still unwritten',
-            'Writes everything to the SD card',
-            'Powers the Pi off',
-          ].map((step) => (
-            <li key={step} className="flex gap-2.5">
-              <span
-                aria-hidden
-                className="mt-[7px] size-1 shrink-0 rounded-full bg-ink-500"
-              />
-              {step}
-            </li>
-          ))}
-        </ul>
-
-        <p className="mt-4 rounded-panel border border-ink-800 bg-white/5 px-3 py-2.5 text-[12px] text-ink-400">
-          Wait for the green LED on the Pi to stop blinking before you flip the switch.
-          That is the card finishing its last write.
+          This will power down the Pi safely. All motors will be stopped, and any runs
+          currently in progress will be stopped. Wait for the green LED on the Pi to stop
+          blinking before you turn the robot off so the SD card will finish writing.
         </p>
 
         {error && (

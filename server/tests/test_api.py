@@ -57,6 +57,30 @@ class TestTelemetry:
         assert body["alert"] is not None
 
 
+class TestNorth:
+    def test_refused_when_there_is_no_imu_to_anchor_to(self, client):
+        """No sensor on a laptop. A reference against nothing would read as set
+        and mean nothing."""
+        response = client.post("/api/north", json={"facing_deg": 0.0})
+
+        assert response.status_code == 409
+        assert client.get("/api/telemetry").json()["orientation"]["north_set"] is False
+
+    def test_a_bearing_outside_a_circle_is_rejected(self, client):
+        assert client.post("/api/north", json={"facing_deg": 360.0}).status_code == 422
+        assert client.post("/api/north", json={"facing_deg": -1.0}).status_code == 422
+
+    def test_clearing_is_harmless_when_it_was_never_set(self, client):
+        assert client.request("DELETE", "/api/north").status_code == 200
+
+    def test_the_heading_is_null_until_north_is_set(self, client):
+        orientation = client.get("/api/telemetry").json()["orientation"]
+
+        assert orientation["heading_deg"] is None
+        assert orientation["north_set"] is False
+        assert orientation["north_stale"] is False
+
+
 class TestLed:
     def test_clamps_out_of_range_requests(self, client):
         assert client.post("/api/led", json={"level": 5.0}).status_code == 422
@@ -90,6 +114,48 @@ class TestRuns:
         assert defect["code"] == "RB"
         assert defect["chainage_m"] is not None
         assert defect["chainage_uncertainty_m"] is not None
+
+    def test_the_motors_are_armed_only_while_a_run_is_open(self, client):
+        assert client.get("/api/telemetry").json()["drive"]["armed"] is False
+
+        run = client.post("/api/runs", json={"name": "a"}).json()["run"]
+        assert client.get("/api/telemetry").json()["drive"]["armed"] is True
+
+        client.post(f"/api/runs/{run['id']}/end")
+        assert client.get("/api/telemetry").json()["drive"]["armed"] is False
+
+    def test_an_entry_point_survives_the_round_trip(self, client):
+        run = client.post(
+            "/api/runs",
+            json={
+                "name": "MH12",
+                "origin": {"lat": 51.5072, "lon": -0.1276, "bearing_deg": 217.5},
+            },
+        ).json()["run"]
+
+        assert run["origin"] == {
+            "lat": 51.5072,
+            "lon": -0.1276,
+            "bearing_deg": 217.5,
+        }
+        assert client.get(f"/api/runs/{run['id']}").json()["origin"] == run["origin"]
+
+    def test_a_run_without_an_entry_point_is_still_valid(self, client):
+        """Nobody is forced to place the robot on a map to start driving."""
+        run = client.post("/api/runs", json={"name": "a"}).json()["run"]
+        assert run["origin"] is None
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            {"lat": 91.0, "lon": 0.0},
+            {"lat": 0.0, "lon": -181.0},
+            {"lat": 0.0, "lon": 0.0, "bearing_deg": 360.0},
+        ],
+    )
+    def test_an_impossible_entry_point_is_refused(self, client, origin):
+        response = client.post("/api/runs", json={"name": "a", "origin": origin})
+        assert response.status_code == 422
 
     def test_severity_outside_one_to_five_is_rejected(self, client):
         run = client.post("/api/runs", json={"name": "a"}).json()["run"]

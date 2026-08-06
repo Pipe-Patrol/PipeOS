@@ -131,6 +131,120 @@ class TestReverse:
         assert state.distance_travelled_m == pytest.approx(3.0, abs=0.05)
 
 
+class TestInertial:
+    """Distance built by integrating acceleration, and the deadband that makes
+    that survivable. See the module docstring in estimation/odometry.py."""
+
+    def test_acceleration_builds_a_velocity(self, rig):
+        drive, imu, flow, odometry, clock = rig
+        drive.drive_forward(0.2)
+        flow.blind()
+        imu.accelerate(0.4)
+
+        state = run_for(odometry, 0.5, clock)
+
+        # 0.4 m/s^2 for half a second, capped by nothing yet.
+        assert state.source == "inertial"
+        assert state.speed_m_s == pytest.approx(0.2, abs=0.05)
+
+    def test_a_steady_crawl_keeps_logging_distance(self, rig):
+        """The case a naive deadband gets catastrophically wrong.
+
+        Steady speed means zero acceleration. If the deadband were read as "not
+        moving", a robot crawling forty metres down a pipe at a constant 20 cm/s
+        would log almost none of it.
+        """
+        drive, imu, flow, odometry, clock = rig
+        drive.drive_forward(0.2)
+        flow.blind()
+
+        imu.accelerate(0.4)
+        run_for(odometry, 0.5, clock)  # up to speed
+        imu.coast()  # inside the deadband: no acceleration to feel
+        state = run_for(odometry, 10.0, clock)
+
+        assert state.speed_m_s == pytest.approx(0.2, abs=0.05)
+        assert state.distance_travelled_m == pytest.approx(2.05, abs=0.15)
+
+    def test_the_deadband_alone_does_not_stop_the_odometer(self, rig):
+        drive, imu, flow, odometry, clock = rig
+        drive.drive_forward(0.2)
+        flow.blind()
+        imu.accelerate(0.4)
+        run_for(odometry, 0.5, clock)
+
+        imu.coast()
+        before = odometry.status()["distance_travelled_m"]
+        run_for(odometry, 5.0, clock)
+
+        assert odometry.status()["distance_travelled_m"] > before
+
+    def test_stopped_and_feeling_nothing_zeroes_the_velocity(self, rig):
+        """Deadband AND no throttle. Only both together mean parked."""
+        drive, imu, flow, odometry, clock = rig
+        drive.drive_forward(0.2)
+        flow.blind()
+        imu.accelerate(0.4)
+        run_for(odometry, 1.0, clock)
+
+        drive.stop()
+        imu.coast()
+        state = run_for(odometry, 1.0, clock)
+        travelled = state.distance_travelled_m
+
+        state = run_for(odometry, 60.0, clock)
+
+        assert state.speed_m_s == 0.0
+        # A whole minute parked adds nothing. Integrating noise instead would
+        # have quietly logged metres the robot never travelled.
+        assert state.distance_travelled_m == pytest.approx(travelled, abs=0.001)
+
+    def test_drift_cannot_exceed_what_the_motors_could_deliver(self, rig):
+        """A stuck-high accelerometer must not integrate into a fantasy."""
+        drive, imu, flow, odometry, clock = rig
+        drive.drive_forward(0.2)
+        flow.blind()
+        imu.accelerate(9.0)
+
+        state = run_for(odometry, 30.0, clock)
+
+        assert state.speed_m_s <= odometry_ceiling()
+
+    def test_the_camera_corrects_the_integrator_on_a_slip(self, rig):
+        drive, imu, flow, odometry, clock = rig
+
+        # Calibrate the visual scale on a genuine roll, as ever.
+        drive.drive_forward(0.2)
+        flow.see(divergence=0.5)
+        run_for(odometry, 20.0, clock)
+
+        # Now the wheels spin and the picture holds still. The accelerometer
+        # feels nothing either -- a robot going nowhere is not accelerating.
+        imu.coast()
+        flow.see_nothing()
+        state = run_for(odometry, 10.0, clock)
+
+        assert state.slipping is True
+        assert state.speed_m_s == pytest.approx(0.0, abs=0.02)
+
+    def test_falls_back_to_duty_when_no_accelerometer_is_fitted(self, rig):
+        drive, imu, flow, odometry, clock = rig
+        drive.drive_forward(0.2)
+        flow.blind()
+        assert imu.acceleration is None
+
+        state = run_for(odometry, 10.0, clock)
+
+        assert state.source == "duty"
+        assert state.distance_travelled_m == pytest.approx(2.0, abs=0.05)
+
+
+def odometry_ceiling():
+    from pipepatrol.estimation.odometry import SPEED_CEILING_M_S
+
+    return SPEED_CEILING_M_S
+
+
 class TestReset:
     def test_zeroes_the_run_but_keeps_the_learned_scale(self, rig):
         drive, _, flow, odometry, clock = rig

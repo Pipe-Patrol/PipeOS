@@ -1,5 +1,6 @@
 import { Navigate, useParams } from 'react-router-dom'
 
+import { GeoTraceMap } from '@/components/map/GeoTraceMap'
 import { PathMap } from '@/components/map/PathMap'
 import { Page } from '@/components/shell/Page'
 import { Button } from '@/components/primitives/Button'
@@ -13,9 +14,10 @@ import type { Motion } from '@/robot/types'
 /**
  * One run, after the fact.
  *
- * Every distance here carries its uncertainty. That is the difference between a
- * record someone can act on and a number that merely looks precise — and it is
- * the reason the CSV export puts the two in adjacent columns.
+ * Every distance here is an estimate, and the page says so once rather than
+ * appending a margin to each number. The stored uncertainty still travels with
+ * the run and still has its own column in the CSV export, where a report can
+ * make something of it.
  */
 export function RunDetailRoute() {
   const { runId } = useParams<{ runId: string }>()
@@ -76,7 +78,7 @@ export function RunDetailRoute() {
         <dl className="panel grid grid-cols-2 gap-x-6 gap-y-4 p-4 sm:grid-cols-4">
           <Stat
             label="Distance"
-            value={format.metresWithError(run.distance_m, run.uncertainty_m)}
+            value={format.metres(run.distance_m)}
           />
           <Stat label="Duration" value={format.duration(run.duration_s)} />
           <Stat label="Defects" value={String(run.defects.length)} />
@@ -92,12 +94,19 @@ export function RunDetailRoute() {
           />
         </dl>
 
+        {/* On a map when the operator placed the run, in its own frame when
+            they did not. Both draw the same dead-reckoned track; the map only
+            adds where it started and which way it faced. */}
         <div className="panel p-4">
-          <PathMap
-            path={run.path}
-            motion={motionFromRun(run.path, run.uncertainty_m)}
-            height={180}
-          />
+          {run.origin ? (
+            <GeoTraceMap origin={run.origin} path={run.path} height={180} />
+          ) : (
+            <PathMap
+              path={run.path}
+              motion={motionFromRun(run.path, run.uncertainty_m)}
+              height={180}
+            />
+          )}
         </div>
       </section>
 
@@ -130,10 +139,7 @@ export function RunDetailRoute() {
                     {defect.clock_position ?? format.BLANK}
                   </span>
                   <span className="text-right text-[13px] tnum text-ink-400">
-                    {format.metresWithError(
-                      defect.chainage_m,
-                      defect.chainage_uncertainty_m,
-                    )}
+                    {format.metres(defect.chainage_m)}
                   </span>
                   <span className="truncate text-[12px] text-ink-500">
                     {defect.note || format.BLANK}

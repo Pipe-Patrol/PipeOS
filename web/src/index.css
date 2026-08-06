@@ -134,6 +134,23 @@ body,
     inset 0 1px 0 rgb(255 255 255 / 0.05);
 }
 
+/**
+ * The label on a readout over the video. Brighter than a `label` in a panel,
+ * because it is competing with pipe wall rather than sitting on a dark surface —
+ * at ink-400 over a wet grey brick the word "Air" simply disappears.
+ */
+@utility overlay-label {
+  font-size: 10.5px;
+  line-height: 13px;
+  font-weight: 500;
+  color: rgb(255 255 255 / 0.72);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-shadow:
+    0 1px 4px rgb(0 0 0 / 0.9),
+    0 0 14px rgb(0 0 0 / 0.55);
+}
+
 /** Section labels and column headers. Small, spaced, never shouty. */
 @utility label {
   font-size: 10.5px;

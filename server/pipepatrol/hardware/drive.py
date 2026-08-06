@@ -169,6 +169,7 @@ class Drive:
         self._moving_since = None  # when the motors last went nonzero
         self._last_stop_reason = "startup"
         self._run_limit_tripped = False  # latched until the operator commands zero
+        self._armed = False  # no run open -> no movement
 
         atexit.register(self.close)
 
@@ -179,6 +180,11 @@ class Drive:
         return self._backend.available
 
     @property
+    def armed(self):
+        with self._lock:
+            return self._armed
+
+    @property
     def duties(self):
         """(left, right) signed duty currently applied. For the estimators."""
         with self._lock:
@@ -186,10 +192,37 @@ class Drive:
 
     # --- control ---
 
+    def arm(self, armed, reason="run"):
+        """Allow or forbid movement. Disarming stops the motors immediately.
+
+        Runs own this: the robot arms when a run opens and disarms when it
+        closes. It lives here rather than in the API layer for the same reason
+        every other protection does -- so it still holds when the web code is
+        what broke.
+        """
+        with self._lock:
+            if self._armed == armed:
+                return
+            self._armed = armed
+            if not armed:
+                self._apply(0.0, 0.0)
+                self._last_stop_reason = f"disarmed: {reason}"
+        log.info("motors %s (%s)", "armed" if armed else "disarmed", reason)
+
     def command(self, left, right):
         """Accept a raw -1.0..1.0 tank command. Returns the duties actually applied."""
         with self._lock:
             if self._closed:
+                return 0.0, 0.0
+
+            # No run open, nothing moves. A command arriving here is not an
+            # error -- the console sends a zero throttle continuously whether or
+            # not a run is going -- so this refuses quietly rather than raising.
+            if not self._armed:
+                self._last_command_at = time.monotonic()
+                if self._left != 0.0 or self._right != 0.0:
+                    self._apply(0.0, 0.0)
+                self._last_stop_reason = "no run started"
                 return 0.0, 0.0
 
             self._last_command_at = time.monotonic()
@@ -285,6 +318,10 @@ class Drive:
                     (self._left + self._right) / 2.0 * TOP_SPEED_M_S, 3
                 ),
                 "moving": self._left != 0.0 or self._right != 0.0,
+                # False until a run is open. The console reads this to explain
+                # why the keys do nothing, rather than leaving an operator
+                # jabbing at W wondering whether the robot has died.
+                "armed": self._armed,
                 "run_seconds": round(run_elapsed, 1),
                 "run_limit_tripped": self._run_limit_tripped,
                 "last_stop_reason": self._last_stop_reason,

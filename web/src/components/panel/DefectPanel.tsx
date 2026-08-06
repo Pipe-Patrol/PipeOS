@@ -6,6 +6,7 @@ import { Popover } from '@/components/primitives/Popover'
 import { ClockIcon } from '@/components/primitives/icons'
 import { DEFECT_GROUPS, DEFECT_TYPES, defectLabel } from '@/constants/defects'
 import * as format from '@/lib/format'
+import { useTempUnit } from '@/lib/units'
 import type { RobotClient } from '@/robot/client'
 import type { ClimateReading, DefectRegion, Motion, Run } from '@/robot/types'
 
@@ -73,6 +74,7 @@ export function DefectPanel({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [unit] = useTempUnit()
 
   // A live clock so "Time logged" reads as the moment it will be filed.
   useEffect(() => {
@@ -241,7 +243,10 @@ export function DefectPanel({
           />
           <Info label="Distance from entry" value={format.metres(motion.chainage_m)} />
           <Info label="Time logged" value={new Date(now).toLocaleTimeString()} />
-          <Info label="Temperature" value={format.celsius(climate.temperature_c)} />
+          <Info
+            label="Temperature"
+            value={format.temperature(climate.temperature_c, unit)}
+          />
           <Info label="Humidity" value={format.percent(climate.humidity_pct)} />
         </div>
 

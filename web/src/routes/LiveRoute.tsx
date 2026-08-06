@@ -20,7 +20,9 @@ import { useDriveInput } from '@/input/useDriveInput'
 import { readError } from '@/lib/errors'
 import { saveRunJson, saveSnapshotLocally } from '@/lib/localSave'
 import { useRobot } from '@/robot/RobotProvider'
+import { useLiveTrail } from '@/robot/useLiveTrail'
 import { useRun } from '@/robot/useRun'
+import type { OriginDraft } from '@/components/map/geo'
 import type { DefectRegion, Run } from '@/robot/types'
 
 /**
@@ -60,6 +62,7 @@ export function LiveRoute() {
     name: string
     record: boolean
     saveDir: FileSystemDirectoryHandle | null
+    origin: OriginDraft | null
   } | null>(null)
   // The folder to mirror this run into, once it has started. Null = robot only.
   const [saveDir, setSaveDir] = useState<FileSystemDirectoryHandle | null>(null)
@@ -78,6 +81,11 @@ export function LiveRoute() {
 
   const activeRunId = telemetry?.run.active ? telemetry.run.id : null
   const { run, refresh: refreshRun } = useRun(client, activeRunId)
+
+  // The map draws this rather than run.path. The robot's copy only reaches the
+  // console when something forces a refetch — a snapshot, a defect — so drawing
+  // it live produced straight lines hinged on the markers instead of a track.
+  const trail = useLiveTrail(activeRunId, telemetry?.motion.position ?? null, run?.path)
 
   // Driving is locked while any of these has the screen — including drawing,
   // where the operator is pointing at pipe wall rather than watching where the
@@ -189,9 +197,14 @@ export function LiveRoute() {
 
   // Step one: the prompt opens the preflight gate rather than starting.
   const requestStart = useCallback(
-    (name: string, record: boolean, dir: FileSystemDirectoryHandle | null) => {
+    (
+      name: string,
+      record: boolean,
+      dir: FileSystemDirectoryHandle | null,
+      origin: OriginDraft | null,
+    ) => {
       setRunError(null)
-      setPreflight({ name, record, saveDir: dir })
+      setPreflight({ name, record, saveDir: dir, origin })
     },
     [],
   )
@@ -204,7 +217,11 @@ export function LiveRoute() {
     try {
       const { run } = await client.request<{ run: Run }>('/api/runs', {
         method: 'POST',
-        body: JSON.stringify({ name: preflight.name, record: preflight.record }),
+        body: JSON.stringify({
+          name: preflight.name,
+          record: preflight.record,
+          origin: preflight.origin,
+        }),
       })
       setSaveDir(preflight.saveDir)
       if (preflight.saveDir) {
@@ -223,9 +240,15 @@ export function LiveRoute() {
   const drive = useDriveInput({
     client,
     // Locked whenever a command could not be trusted to arrive, or a dialog has
-    // the keyboard. The server's watchdog is the backstop, not the mechanism.
+    // the keyboard. `armed` is the robot's own answer to "is a run open" — read
+    // from telemetry rather than inferred from run.active here, so the console
+    // shows the state the motors are actually in. The server enforces all of
+    // this independently; the watchdog is the backstop, not the mechanism.
     enabled:
-      !modalOpen && link.state === 'connected' && telemetry?.drive.hardware === true,
+      !modalOpen &&
+      link.state === 'connected' &&
+      telemetry?.drive.hardware === true &&
+      telemetry?.drive.armed === true,
     onSnapshot: () => void snapshot(),
   })
 
@@ -294,7 +317,11 @@ export function LiveRoute() {
             )}
 
             <div className="absolute bottom-5 left-5 z-10">
-              <PipeMap path={run?.path ?? []} motion={telemetry.motion} />
+              <PipeMap
+                path={trail}
+                motion={telemetry.motion}
+                origin={run?.origin ?? null}
+              />
             </div>
 
             <div className="absolute right-5 bottom-5 z-10">
@@ -369,7 +396,12 @@ export function LiveRoute() {
               />
             )}
 
-            {!telemetry.run.active && <StartRunPrompt onStart={requestStart} />}
+            {!telemetry.run.active && (
+              <StartRunPrompt
+                onStart={requestStart}
+                heading={telemetry.orientation.heading_deg}
+              />
+            )}
           </>
         )}
 

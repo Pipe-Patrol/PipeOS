@@ -41,9 +41,29 @@ class FakeDrive:
 
 
 class FakeIMU:
-    def __init__(self, still=False, yaw=0.0):
+    """Defaults to no accelerometer at all.
+
+    `acceleration = None` is the honest default: it is what a robot with no IMU
+    fitted reports, and it keeps a test that only cares about duty or flow from
+    having to opt out of the integrator.
+
+    Anything set here is already past the deadband, exactly like the real
+    hardware -- hardware/imu.py applies it before the number is readable, so a
+    fake that handed out raw noise would be testing a path that cannot happen.
+    """
+
+    def __init__(self, still=False, yaw=0.0, acceleration=None):
         self.still = still
         self.yaw = yaw
+        self.acceleration = acceleration
+
+    def accelerate(self, m_s2):
+        """Feel a real acceleration, i.e. one outside the deadband."""
+        self.acceleration = m_s2
+
+    def coast(self):
+        """Fitted, reading cleanly, feeling nothing -- inside the deadband."""
+        self.acceleration = 0.0
 
     def seems_still(self):
         return self.still

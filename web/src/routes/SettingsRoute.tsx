@@ -3,8 +3,10 @@ import { Navigate } from 'react-router-dom'
 
 import { Page } from '@/components/shell/Page'
 import { Button } from '@/components/primitives/Button'
+import { NorthReference } from '@/components/settings/NorthReference'
 import { PoweredOff, ShutdownDialog } from '@/components/shell/ShutdownDialog'
 import * as format from '@/lib/format'
+import { useTempUnit } from '@/lib/units'
 import { useRobot } from '@/robot/RobotProvider'
 
 const WALKTHROUGH_KEY = 'pipepatrol.walkthroughDismissed'
@@ -20,6 +22,7 @@ export function SettingsRoute() {
   const { client, health, telemetry, disconnect } = useRobot()
   const [confirming, setConfirming] = useState(false)
   const [halted, setHalted] = useState(false)
+  const [unit, setUnit] = useTempUnit()
 
   // Checked before the client guard on purpose. Halting clears the client, and
   // being bounced to the connect picker mid-shutdown would take away the one
@@ -80,6 +83,8 @@ export function SettingsRoute() {
         </section>
       )}
 
+      <NorthReference client={client} orientation={telemetry?.orientation ?? null} />
+
       <section className="panel p-4">
         <h2 className="label mb-3">Storage</h2>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
@@ -97,6 +102,33 @@ export function SettingsRoute() {
 
       <section className="panel p-4">
         <h2 className="label mb-3">Console</h2>
+
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="label">Temperature</div>
+            <p className="mt-1 text-[12px] text-ink-500">
+              Display only. Readings are recorded in Celsius either way.
+            </p>
+          </div>
+          <div className="flex shrink-0 rounded-panel border border-ink-800 p-0.5">
+            {(['C', 'F'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={unit === option}
+                onClick={() => setUnit(option)}
+                className={`tnum h-8 w-12 rounded-[6px] text-[13px] transition-colors ${
+                  unit === option
+                    ? 'bg-white/16 text-ink-0'
+                    : 'text-ink-400 hover:bg-white/8 hover:text-ink-100'
+                }`}
+              >
+                °{option}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <Button
           variant="quiet"
           onClick={() => {
@@ -114,7 +146,6 @@ export function SettingsRoute() {
       {confirming && (
         <ShutdownDialog
           client={client}
-          runActive={telemetry?.run.active ?? false}
           onCancel={() => setConfirming(false)}
           onDisconnect={() => {
             setConfirming(false)

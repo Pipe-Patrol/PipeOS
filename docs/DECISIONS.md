@@ -29,7 +29,7 @@ differently in the console:
 | Tier | Meaning | Console treatment |
 |---|---|---|
 | `measured` | Came off a sensor | Plain value |
-| `estimated` | Derived and drifting | `EST` badge, uncertainty shown |
+| `estimated` | Derived and drifting | `EST` badge; uncertainty recorded and in the JSON export, not shown beside the number |
 | `unavailable` | No sensor exists | Struck-through blank, never a number |
 
 A fabricated battery percentage would be trusted by a crew standing over an open
@@ -37,23 +37,49 @@ manhole. That is the failure this rule exists to prevent.
 
 ## Distance, and why it is estimated
 
-There are no wheel encoders, so distance is inferred from two weak sources that
-fail differently, blended in `estimation/odometry.py`:
+There are no wheel encoders, so distance is inferred from three weak sources
+that fail differently, blended in `estimation/odometry.py`:
 
-1. **Commanded-duty integration.** Duty × top speed × time. Wrong whenever the
+1. **Inertial integration.** IMU acceleration integrated once into a velocity.
+   The only source that knows about motion the wheels did not cause — being
+   dragged, sliding back down a fall — and the first to react to a real start or
+   stop. Drifts, because integrating a noisy number accumulates its noise.
+2. **Commanded-duty integration.** Duty × top speed × time. Wrong whenever the
    wheels slip or the load changes, but the error grows linearly and is bounded.
-2. **Visual odometry.** Sparse optical flow between camera frames
+   It is what bounds source 1: the motors are the only thing that can push this
+   chassis, so they cap how fast it can possibly be going.
+3. **Visual odometry.** Sparse optical flow between camera frames
    (`estimation/flow.py`). Scale-ambiguous on its own, so it is calibrated
-   against source 1 while the robot is confidently rolling, then trusted to
-   correct it when the two disagree — which is exactly the slip case.
+   against source 2 while the robot is confidently rolling, then trusted to
+   correct the integrator when they disagree — which is exactly the slip case.
 
-Deliberately **not** used: double-integrating IMU acceleration. Error grows with
-the square of time; over a five-minute run the number is meaningless. The IMU's
-acceleration is used only to answer "is it actually moving", which is a
-comparison, not an integral.
+With no accelerometer fitted it falls back to 2 and 3 alone.
 
-Uncertainty grows monotonically and is reported alongside the distance. It never
-recovers, because nothing underground can re-fix it.
+### The deadband is what makes integration survivable
+
+`hardware/imu.py` reports acceleration inside ±0.1 m/s² as **exactly zero**, and
+everything downstream reads that as "no acceleration", not "no movement". The
+distinction is the whole design:
+
+| State | Acceleration | What happens |
+|---|---|---|
+| Accelerating | outside the band | velocity climbs |
+| Steady crawl | reads 0 | velocity is **held** — distance keeps accumulating |
+| Stopped | reads 0, and nothing commanded | velocity forced to 0 |
+
+Reading the deadband as "not moving" would be catastrophic in the ordinary case:
+steady speed *is* zero acceleration, so a robot crawling forty metres at a
+constant 20 cm/s would log almost none of it. Leaving the noise in is the
+opposite failure — a parked robot integrates jitter into a phantom velocity and
+quietly logs metres it never travelled over a lunch break.
+
+Uncertainty still grows monotonically and is still recorded against every
+distance and every defect chainage, and it is still in the JSON export. It is no
+longer shown beside the number on screen, nor given a column in the defect CSV:
+the `estimated` badge already says the number is derived, and a margin on every
+reading was being read as precision rather than as doubt. The CSV is the sheet an
+inspector fills a report out of, and that column was never one of the ones they
+filled in.
 
 ## Stall detection without a current sensor **[chosen]**
 
@@ -65,6 +91,48 @@ longer than a debounce window. That is a jammed robot.
 It is a heuristic and is labelled one. It does not cut the motors on its own —
 it raises an alert, because a false positive that stops the robot mid-pipe is
 its own kind of failure. Wiring an INA260 would replace this with a measurement.
+
+## The motors only turn during a run **[chosen]**
+
+`hardware/drive.py` holds an `armed` flag. `Robot.start_run` sets it, `end_run`
+clears it, and `command()` refuses everything — quietly, returning zero duties —
+while it is false. The console reads `drive.armed` out of telemetry and locks
+its own input to match, but that is the courtesy copy; this one holds when the
+browser or the socket is what broke, like every other protection in that file.
+
+This reverses the original design, which allowed driving with no run open so an
+operator could check the camera. The cost of that was an inspection driven in
+full and saved nowhere, discovered at the far end of a pipe. A locked keyboard
+at the near end is the cheaper failure.
+
+## The map is anchored by hand **[chosen]**
+
+There is no GPS on the robot and there would be no signal for one down a pipe,
+so the operator places the run's entry point on a Leaflet map before starting —
+by clicking, from the browser's own location, or by typing coordinates off a
+site plan. They also give the bearing the robot faces going in, because the IMU
+runs on the game rotation vector with no magnetometer and its yaw is relative to
+power-on: nothing on the robot knows where north is.
+
+Both live on the run as its `origin`, and `components/map/geo.ts` projects the
+odometer's local x/y into lat/lon through them. Runs without an origin are still
+valid; their track is drawn in its own frame with no map behind it.
+
+Setting the bearing per run gets old, so Settings has a **north reference**:
+point the chassis at a known direction, say what it is, and `IMU.set_north()`
+anchors every later yaw to the compass. New runs then take their entry bearing
+from the robot's own heading and the operator does not have to think about it.
+
+The reference is deliberately not persisted. Game rotation vector yaw counts
+from sensor power-on, and the IMU reconnects on its own after a wedged I2C bus —
+a datum from before that restart is meaningless, so it is reported `stale` and
+the heading goes back to null. A compass wrong by an unknown amount is worse
+than no compass.
+
+Tiles come from OpenStreetMap over the internet, which a van at the side of a
+road may not have. Every map reports that and stays usable without them —
+clicking, coordinates and the drawn track do not need tiles. Leaflet itself is
+bundled from npm, not a CDN, for the same reason the fonts are.
 
 ## What was cut for v1 **[chosen]**
 

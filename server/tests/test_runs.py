@@ -117,7 +117,7 @@ class TestDurability:
 
 
 class TestExport:
-    def test_csv_carries_the_uncertainty_beside_the_chainage(self):
+    def test_csv_carries_the_chainage(self):
         run = Run(name="run")
         run.defects.append(
             Defect(code="RB", chainage_m=10.0, chainage_uncertainty_m=1.5)
@@ -126,8 +126,31 @@ class TestExport:
         text = export.to_csv(run).decode()
 
         header, row = text.splitlines()[0], text.splitlines()[1]
-        assert "chainage_uncertainty_m" in header
-        assert "1.5" in row
+        assert "chainage_m" in header
+        assert "10.0" in row
+
+    def test_csv_leaves_the_uncertainty_out(self):
+        """It is still recorded, and still in the JSON. It is not a column an
+        inspector fills a report out of."""
+        run = Run(name="run")
+        run.defects.append(
+            Defect(code="RB", chainage_m=10.0, chainage_uncertainty_m=1.5)
+        )
+
+        text = export.to_csv(run).decode()
+
+        assert "chainage_uncertainty_m" not in text
+        assert "1.5" not in text
+
+    def test_the_uncertainty_is_still_in_the_json(self):
+        run = Run(name="run")
+        run.defects.append(
+            Defect(code="RB", chainage_m=10.0, chainage_uncertainty_m=1.5)
+        )
+
+        data = json.loads(export.to_json(run))
+
+        assert data["defects"][0]["chainage_uncertainty_m"] == 1.5
 
     def test_json_is_the_whole_run(self):
         run = Run(name="run", distance_m=5.0)

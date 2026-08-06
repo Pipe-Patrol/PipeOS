@@ -21,9 +21,23 @@ from pipepatrol.runs.models import Defect
 router = APIRouter(prefix="/api/runs")
 
 
+class OriginRequest(BaseModel):
+    """Where the operator placed the entry point on the map."""
+
+    lat: float = Field(ge=-90.0, le=90.0)
+    lon: float = Field(ge=-180.0, le=180.0)
+    # Compass direction the robot faces going in, 0 = north. Null means the
+    # operator did not say, in which case the robot fills it in from its own
+    # heading if a north reference has been set, and falls back to north.
+    bearing_deg: float | None = Field(default=None, ge=0.0, lt=360.0)
+
+
 class StartRunRequest(BaseModel):
     name: str = ""
     record: bool = False
+    # None when the operator did not place the run on the map. The run is still
+    # perfectly valid -- it just has no anchor, so its track stays local.
+    origin: OriginRequest | None = None
 
 
 class Region(BaseModel):
@@ -53,7 +67,11 @@ async def list_runs(robot=Depends(get_robot)):
 
 @router.post("")
 async def start_run(payload: StartRunRequest, robot=Depends(get_robot)):
-    run = robot.start_run(name=payload.name, record=payload.record)
+    run = robot.start_run(
+        name=payload.name,
+        record=payload.record,
+        origin=payload.origin.model_dump() if payload.origin else None,
+    )
     return {"ok": True, "run": run.as_dict()}
 
 

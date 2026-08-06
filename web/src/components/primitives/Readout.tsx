@@ -42,7 +42,7 @@ export function Readout({
 
   return (
     <div className="flex min-w-0 flex-col items-center gap-1">
-      <span className="label flex items-center gap-1">
+      <span className="overlay-label flex items-center gap-1">
         {icon}
         {label}
       </span>
@@ -57,8 +57,12 @@ export function Readout({
         </span>
       )}
 
+      {/* Not a footnote. The one thing under here is acceleration, which is
+          what tells an operator the robot has actually started moving rather
+          than sitting there with the motors whining — so it is sized to be
+          read at a glance from across a van, not squinted at. */}
       {detail && (
-        <span className="overlay-text text-[10px] leading-none opacity-70">
+        <span className="overlay-text tnum text-[13px] leading-none font-medium">
           {detail}
         </span>
       )}

@@ -103,12 +103,47 @@ class Recording:
 
 
 @dataclass
+class Origin:
+    """Where on the earth the run started, and which way the robot faced.
+
+    Placed by the operator on a map, not measured -- there is no GPS on the
+    robot and there would be no signal for it down a pipe. It is the anchor the
+    whole track hangs off: every x/y in `Run.path` is metres from here.
+
+    `bearing_deg` is the compass direction the robot was pointing when the run
+    began, 0 = north. The IMU's yaw is relative to startup and has no
+    magnetometer behind it, so this is the only thing that ties the track to
+    real-world directions. Left at 0 it means the operator did not say, and the
+    track is drawn as though the robot entered heading north.
+    """
+
+    lat: float = 0.0
+    lon: float = 0.0
+    bearing_deg: float = 0.0
+
+    def as_dict(self):
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            lat=float(data.get("lat", 0.0)),
+            lon=float(data.get("lon", 0.0)),
+            bearing_deg=float(data.get("bearing_deg", 0.0)),
+        )
+
+
+@dataclass
 class Run:
     id: str = field(default_factory=_new_id)
     name: str = ""
     started_at: float = field(default_factory=time.time)
     ended_at: float | None = None
     note: str = ""
+
+    # Where the operator says the robot went in. None when they did not place
+    # it, in which case the track is drawn in its own local frame and no map.
+    origin: Origin | None = None
 
     # Odometry at the moment the run ended, or the last sample seen. Estimated,
     # like everything derived from it.
@@ -139,6 +174,7 @@ class Run:
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "note": self.note,
+            "origin": self.origin.as_dict() if self.origin else None,
             "distance_m": round(self.distance_m, 2),
             "uncertainty_m": round(self.uncertainty_m, 2),
             "duration_s": round(self.duration_s, 1),
@@ -157,6 +193,7 @@ class Run:
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "duration_s": round(self.duration_s, 1),
+            "origin": self.origin.as_dict() if self.origin else None,
             "distance_m": round(self.distance_m, 2),
             "uncertainty_m": round(self.uncertainty_m, 2),
             "interrupted": self.interrupted,
@@ -168,12 +205,14 @@ class Run:
     @classmethod
     def from_dict(cls, data):
         recording = data.get("recording")
+        origin = data.get("origin")
         return cls(
             id=data.get("id", _new_id()),
             name=data.get("name", ""),
             started_at=data.get("started_at", 0.0),
             ended_at=data.get("ended_at"),
             note=data.get("note", ""),
+            origin=Origin.from_dict(origin) if origin else None,
             distance_m=data.get("distance_m", 0.0),
             uncertainty_m=data.get("uncertainty_m", 0.0),
             defects=[Defect.from_dict(d) for d in data.get("defects", [])],

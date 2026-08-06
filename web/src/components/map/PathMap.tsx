@@ -1,10 +1,12 @@
 import { useMemo } from 'react'
 
 import * as format from '@/lib/format'
-import type { Motion, PathPoint } from '@/robot/types'
+import type { TrailPoint } from '@/robot/useLiveTrail'
+import type { Motion } from '@/robot/types'
 
 interface PathMapProps {
-  path: PathPoint[]
+  /** Either the run's stored path or the live trail — only x/y are read. */
+  path: TrailPoint[]
   motion: Motion
   height?: number
 }
@@ -84,7 +86,7 @@ export function PathMap({ path, motion, height = 220 }: PathMapProps) {
       </svg>
 
       <figcaption className="mt-2 flex items-baseline justify-between gap-3">
-        <span className="label">estimated · ±{motion.uncertainty_m.toFixed(1)} m</span>
+        <span className="label">estimated</span>
         <span className="text-[11px] text-ink-500">
           {format.metres(motion.chainage_m)} from start
         </span>

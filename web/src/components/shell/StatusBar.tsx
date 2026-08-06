@@ -3,6 +3,7 @@ import { SignalBars, strengthFromQuality } from '@/components/primitives/SignalB
 import { StatusBarCell } from '@/components/shell/StatusBarCell'
 import { RUN_STATE_PRESENTATION, runStateOf } from '@/constants/run-state'
 import * as format from '@/lib/format'
+import { useTempUnit } from '@/lib/units'
 import { useRobot } from '@/robot/RobotProvider'
 
 const LABEL = 'text-[10px] leading-[12px] font-medium text-ink-400'
@@ -19,6 +20,7 @@ const VALUE = 'tnum text-[14px] leading-[16px] font-semibold'
  */
 export function StatusBar() {
   const { telemetry, link, health } = useRobot()
+  const [unit] = useTempUnit()
 
   const presentation = RUN_STATE_PRESENTATION[runStateOf(telemetry)]
   const runName = telemetry?.run.name ?? null
@@ -77,7 +79,7 @@ export function StatusBar() {
         <StatusBarCell>
           <div className={LABEL}>CPU temp</div>
           <div className={`${VALUE} text-ink-100`}>
-            {format.celsius(telemetry?.host.cpu_temp_c ?? null)}
+            {format.temperature(telemetry?.host.cpu_temp_c ?? null, unit)}
           </div>
         </StatusBarCell>
 

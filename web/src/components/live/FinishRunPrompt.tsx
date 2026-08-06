@@ -69,10 +69,7 @@ export function FinishRunPrompt({
           <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
             <Stat
               label="Distance"
-              value={format.metresWithError(
-                motion.distance_travelled_m,
-                motion.uncertainty_m,
-              )}
+              value={format.metres(motion.distance_travelled_m)}
             />
             <Stat label="Elapsed" value={format.duration(elapsed)} />
             <Stat label="Defects" value={String(defects)} />

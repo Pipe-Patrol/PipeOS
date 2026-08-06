@@ -2,9 +2,12 @@
 
 Three formats, no PDF. A PDF report wants standards-compliant defect coding
 (PACP, MSCC) and that only becomes possible once a model is producing codes --
-until then it would be a nicely typeset guess. JSON and CSV carry everything
-that is actually known, including the uncertainty on every chainage, which a
-report template would quietly drop.
+until then it would be a nicely typeset guess.
+
+The CSV is the defect sheet an inspector actually works from, so it carries the
+columns they fill a report out of and nothing else. The chainage uncertainty is
+still recorded against every defect and is still in the JSON export -- it is one
+column of a spreadsheet it was never used in, not a number that was thrown away.
 """
 
 import csv
@@ -19,7 +22,6 @@ DEFECT_COLUMNS = [
     "severity",
     "clock_position",
     "chainage_m",
-    "chainage_uncertainty_m",
     "note",
     "snapshot_id",
     "detection_id",
@@ -31,11 +33,7 @@ def to_json(run):
 
 
 def to_csv(run):
-    """Defects, one per row.
-
-    Chainage carries its uncertainty in the next column deliberately: a bare
-    distance in a spreadsheet reads as surveyed, and this one is not.
-    """
+    """Defects, one per row."""
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=DEFECT_COLUMNS, extrasaction="ignore")
     writer.writeheader()
