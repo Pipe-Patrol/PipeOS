@@ -33,6 +33,8 @@ gh repo clone Pipe-Patrol/PipeOS
 Builds the console and sets everything up on the Pi over ssh.
 Wait at least 20 seconds after turning on the rover before running the deploy command below.
 
+The password for the Raspberry Pi is ```pipe```.
+
 ```bash
 cd PipeOS
 ./deploy.sh pipepatrol@pipepatrol.local
@@ -50,8 +52,9 @@ ssh access to the Pi and the Pi's apt packages — see
 
 ### If coming from a newly flashed SD card
 
-If you just reflashed your microSD card, complete the setup steps below before continuing; otherwise, skip directly to step 3.
-First, ssh into the Raspberry Pi using ```ssh pipepatrol@pipepatrol.local```
+If you just reflashed your microSD card, complete the setup steps below before continuing; otherwise, skip directly to step 3. Make sure you have ran the deploy command first.
+
+First, ssh into the Raspberry Pi in a new terminal using ```ssh pipepatrol@pipepatrol.local```.
 
 Turning on the **camera**:
 ```
@@ -67,7 +70,12 @@ sudo reboot
 ```
 
 Turning on the **climate**:
+```
+sudo raspi-config nonint do_i2c 0
+sudo reboot
+```
 
+If you want to stop entering the password multiple times during deployment, open a new terminal, and run ```ssh-copy-id pipepatrol@pipepatrol.local```.
 
 Once finished, open a new terminal, and repeat the first code block in this step (Step 2).
 
@@ -114,6 +122,8 @@ Run them before you power the motors.
 
 ### Troubleshooting
 
+If the robot has been working previously, but cannot connect anymore after rebooting or turning the switch on, it is probably since it was not shut down properly. In this case, you will have to reflash the SD card (RPi5, 64-bit, pipepatrol, USG-Mobility).
+
 ```bash
 ping pipepatrol.local                                               # is the Pi on the network?
 ssh pipepatrol@pipepatrol.local                                     # can you reach the Pi at all?
@@ -122,6 +132,7 @@ ssh pipepatrol@pipepatrol.local hostname -I                         # what is th
 ssh pipepatrol@pipepatrol.local 'systemctl status pipepatrol'       # is the server running?
 ssh pipepatrol@pipepatrol.local 'sudo systemctl restart pipepatrol' # bounce the server
 ssh pipepatrol@pipepatrol.local 'journalctl -u pipepatrol -f'       # watch the logs live
+journalctl -u pipepatrol | grep -i "DISABLED\|unavailable        
 ```
 ```bash
 ssh pipepatrol@pipepatrol.local 'journalctl -u pipepatrol -b | grep -i camera'
@@ -163,7 +174,7 @@ PipeOS/
 
 Use this code at your own risk. There are built-in safety features, but assume
 all of them can fail. Please supervise every run. Further information and details
-can be found in [docs/DECISIONS.md](docs/DECISIONS.md).
+can be found in the preflight check.
 
 ### Team
 
