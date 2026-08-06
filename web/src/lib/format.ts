@@ -6,21 +6,13 @@
  * prevent, and it is one careless `?? 0` away at all times.
  */
 
+import type { TempUnit } from '@/lib/units'
+
 export const BLANK = '—'
 
 export function metres(value: number | null | undefined, digits = 1): string {
   if (value == null || !Number.isFinite(value)) return BLANK
   return `${value.toFixed(digits)} m`
-}
-
-/** A distance with its uncertainty, e.g. `12.4 ±1.1 m`. */
-export function metresWithError(
-  value: number | null | undefined,
-  error: number | null | undefined,
-): string {
-  if (value == null || !Number.isFinite(value)) return BLANK
-  if (error == null || !Number.isFinite(error) || error < 0.05) return metres(value)
-  return `${value.toFixed(1)} ±${error.toFixed(1)} m`
 }
 
 export function speed(value: number | null | undefined): string {
@@ -33,9 +25,22 @@ export function degrees(value: number | null | undefined): string {
   return `${value.toFixed(0)}°`
 }
 
-export function celsius(value: number | null | undefined): string {
+/**
+ * A temperature. The value is always Celsius — that is what the robot sends —
+ * and `unit` only decides how it is shown.
+ *
+ * The scale letter is not decoration. It was safe to print a bare `°` while
+ * there was only one scale on the console; now that an operator can change it,
+ * a number with no letter is a number two people can read differently, and this
+ * one goes into reports.
+ */
+export function temperature(
+  value: number | null | undefined,
+  unit: TempUnit = 'C',
+): string {
   if (value == null || !Number.isFinite(value)) return BLANK
-  return `${value.toFixed(0)}°`
+  const shown = unit === 'F' ? value * 1.8 + 32 : value
+  return `${shown.toFixed(0)}°${unit}`
 }
 
 export function percent(value: number | null | undefined): string {

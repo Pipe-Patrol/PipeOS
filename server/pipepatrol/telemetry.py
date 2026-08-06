@@ -71,13 +71,24 @@ def _climate(climate):
 
 
 def _orientation(imu):
-    """Pitch and roll are absolute. Yaw is not, and says so."""
+    """Pitch and roll are absolute. Yaw is not, unless someone has said so.
+
+    `heading_deg` is the compass bearing and is null until the operator sets a
+    north reference (hardware/imu.py set_north), and null again if the sensor
+    reconnects and invalidates it. Never a fallback to the relative yaw: a
+    compass that is wrong by an unknown amount is worse than no compass.
+    """
+    north = imu["north"]
     return {
         "quality": QUALITY_MEASURED if imu["state"] == "ok" else imu["state"],
         "pitch_deg": imu["pitch"],
         "roll_deg": imu["roll"],
         "yaw_deg": imu["yaw"],
         "yaw_is_relative": True,
+        "heading_deg": north["heading_deg"],
+        "north_set": north["set"],
+        # Set once, then the sensor restarted. The operator has to do it again.
+        "north_stale": north["stale"],
         "accel_m_s2": imu["accel_m_s2"],
         "state": imu["state"],
     }

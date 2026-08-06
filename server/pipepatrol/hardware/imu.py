@@ -14,12 +14,19 @@ Two things shape this file:
    grade. Yaw is still reported but it is relative to startup and it drifts --
    do not treat it as a compass heading.
 
+   `set_north()` is how it becomes one. The operator points the robot at a known
+   bearing and says so, and every later yaw is absolute. The reference dies with
+   the sensor session -- a reconnect restarts yaw from a new zero -- so it is
+   reported stale rather than quietly reused. See the north block below.
+
 Reads run on a background thread so a blocked I2C transaction can never stall
 the web server's event loop.
 
-What acceleration is used for: telling motion from stillness, and nothing else.
-It is NOT integrated into a distance -- see docs/DECISIONS.md for why that number
-would be worthless within seconds.
+What acceleration is used for: telling motion from stillness, and feeding the
+odometer's velocity estimate (estimation/odometry.py). It is reported as a
+deadbanded magnitude -- see ACCEL_DEADBAND_M_S2 -- so that a robot standing
+still reads a clean zero rather than sensor noise, and so nothing downstream
+integrates that noise into a distance.
 """
 
 import logging
@@ -34,9 +41,16 @@ POLL_INTERVAL_S = 0.05  # 20 Hz, comfortably faster than the 10 Hz telemetry
 FAILURES_BEFORE_DEGRADED = 5
 REINIT_BACKOFF_S = 5.0
 
-# Gravity-compensated magnitude below this reads as "not being moved". Sized
-# above the BNO085's own noise floor sitting still on a bench.
-STILLNESS_M_S2 = 0.12
+# Gravity-compensated magnitude below this is reported as exactly zero, and is
+# treated as "no acceleration" by everything downstream. Sized above the
+# BNO085's own noise floor sitting still on a bench.
+#
+# Reported as 0.0 rather than as the raw number on purpose. The sensor never
+# reads a clean zero -- it jitters around 0.02-0.08 sitting on the bench -- and
+# a readout that never settles is one an operator stops believing. More
+# importantly the odometer integrates this number, so leaving the noise in
+# would accumulate a phantom velocity out of a robot that is standing still.
+ACCEL_DEADBAND_M_S2 = 0.1
 
 
 def quaternion_to_euler(i, j, k, real):
@@ -54,6 +68,13 @@ def quaternion_to_euler(i, j, k, real):
     yaw = math.atan2(2.0 * (real * k + i * j), 1.0 - 2.0 * (j * j + k * k))
 
     return math.degrees(pitch), math.degrees(roll), math.degrees(yaw)
+
+
+def _deadband(value):
+    """Anything inside the noise floor becomes exactly zero. None passes through."""
+    if value is None:
+        return None
+    return 0.0 if abs(value) <= ACCEL_DEADBAND_M_S2 else value
 
 
 class IMU:
@@ -75,6 +96,16 @@ class IMU:
         self._last_init_attempt = 0.0
         self._present = False
         self._init_error = None
+
+        # The north reference. See set_north() -- this is the yaw reading that
+        # was pointing at true north, and the sensor session it was taken in.
+        self._north_yaw = None
+        self._north_session = None
+        # Bumped on every successful connect. Game rotation vector yaw is
+        # relative to when the sensor started, so a reconnect invalidates any
+        # datum taken before it -- and the sensor reconnects on its own after a
+        # wedged bus, without anyone asking.
+        self._session = 0
 
         if autostart:
             self.start()
@@ -106,7 +137,18 @@ class IMU:
 
     @property
     def acceleration(self):
-        """Gravity-compensated magnitude in m/s^2, or None."""
+        """Gravity-compensated magnitude in m/s^2, deadbanded. None if unread.
+
+        This is the number the odometer integrates, so the deadband is applied
+        here rather than at the point of display: there must not be a version of
+        this reading that the screen calls zero and the estimator does not.
+        """
+        with self._lock:
+            return _deadband(self._accel)
+
+    @property
+    def raw_acceleration(self):
+        """The undeadbanded magnitude. Diagnostics only -- see `acceleration`."""
         with self._lock:
             return self._accel
 
@@ -117,7 +159,81 @@ class IMU:
         stillness, and the stall heuristic must not fire on a dead sensor.
         """
         accel = self.acceleration
-        return accel is not None and accel < STILLNESS_M_S2
+        return accel is not None and accel == 0.0
+
+    # --- the north reference ---
+
+    def set_north(self, facing_deg=0.0):
+        """Declare which way the robot is pointing RIGHT NOW.
+
+        `facing_deg` is the true compass bearing the chassis is facing at the
+        moment of the call: 0 for "I have pointed it at north", or the reading
+        off a handheld compass or a site plan for anything else. From that and
+        the current yaw, every later yaw becomes an absolute bearing.
+
+        This exists because the BNO085 runs on the game rotation vector, which
+        has no magnetometer -- the motor wiring corrupts one anyway. Its yaw is
+        an angle from wherever the sensor happened to be at power-on. It is a
+        perfectly good measure of TURNING and says nothing about DIRECTION, and
+        this is the one number that can bridge the two. Nothing on the robot can
+        measure it, so a person has to supply it.
+
+        Returns the stored reference, or None if there is no yaw to anchor to.
+        """
+        with self._lock:
+            if self._yaw is None:
+                return None
+            # Store the yaw that corresponds to north, so heading is a plain
+            # subtraction afterwards.
+            self._north_yaw = (self._yaw - facing_deg + 180.0) % 360.0 - 180.0
+            self._north_session = self._session
+            reference = self._north_reference()
+        log.info("north set: yaw %.1f is bearing %.1f", self._yaw, facing_deg)
+        return reference
+
+    def clear_north(self):
+        """Forget the reference. Headings go back to being relative."""
+        with self._lock:
+            self._north_yaw = None
+            self._north_session = None
+        log.info("north reference cleared")
+
+    @property
+    def heading_deg(self):
+        """Absolute compass bearing, 0..360, or None if north is not set.
+
+        None whenever the reference is missing or stale. A heading that silently
+        falls back to a relative yaw would be a compass reading that is wrong by
+        an unknown amount, which is worse than no compass at all.
+        """
+        with self._lock:
+            return self._heading_deg()
+
+    def _heading_deg(self):
+        """Holds _lock."""
+        if self._yaw is None or self._north_yaw is None:
+            return None
+        if self._north_session != self._session:
+            return None
+        return (self._yaw - self._north_yaw) % 360.0
+
+    def _north_reference(self):
+        """Holds _lock."""
+        stale = (
+            self._north_yaw is not None and self._north_session != self._session
+        )
+        return {
+            "set": self._north_yaw is not None and not stale,
+            # The sensor restarted since this was taken, so the datum is
+            # meaningless. Reported rather than silently dropped: the operator
+            # set it once and needs telling that it has to be done again.
+            "stale": stale,
+            "heading_deg": (
+                round(self._heading_deg(), 1)
+                if self._heading_deg() is not None
+                else None
+            ),
+        }
 
     # --- internals ---
 
@@ -160,6 +276,9 @@ class IMU:
             self._present = True
             self._accel_enabled = accel_ok
             self._init_error = None
+            # Yaw is about to start counting from a new zero, so whatever north
+            # meant a moment ago no longer means anything.
+            self._session += 1
         log.info(
             "IMU online at 0x%02X, game rotation vector%s enabled",
             I2C_ADDRESS,
@@ -242,8 +361,19 @@ class IMU:
                 "roll": round(self._roll, 1) if self._roll is not None else None,
                 # Relative to startup and drifting -- no magnetometer in game mode.
                 "yaw": round(self._yaw, 1) if self._yaw is not None else None,
-                # Gravity-compensated, so ~0 when stationary at any angle.
-                "accel_m_s2": round(self._accel, 2) if self._accel is not None else None,
+                # Gravity-compensated and deadbanded, so exactly 0 when
+                # stationary at any angle. The raw number rides alongside it for
+                # anyone diagnosing a sensor rather than driving a robot.
+                "accel_m_s2": _deadband(
+                    round(self._accel, 2) if self._accel is not None else None
+                ),
+                "accel_raw_m_s2": (
+                    round(self._accel, 2) if self._accel is not None else None
+                ),
+                "accel_deadband_m_s2": ACCEL_DEADBAND_M_S2,
+                # Absolute compass bearing, or None until someone has said which
+                # way north is. See set_north().
+                "north": self._north_reference(),
                 "reading_age_s": round(age, 2) if age is not None else None,
                 "failures": self._total_failures,
                 "error": self._init_error,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { FinishRunPrompt } from '@/components/live/FinishRunPrompt'
 import { Preflight, PREFLIGHT_CHECKS } from '@/components/live/Preflight'
 import { RegionDrawer } from '@/components/live/RegionDrawer'
 import { ShortcutOverlay } from '@/components/live/ShortcutOverlay'
@@ -9,29 +10,35 @@ import { Walkthrough, hasSeenWalkthrough } from '@/components/live/Walkthrough'
 import { ZoomControl } from '@/components/live/ZoomControl'
 import { PipeMap } from '@/components/map/PipeMap'
 import { AlertBanner } from '@/components/overlay/AlertBanner'
+import { ProfileStrip } from '@/components/profile/ProfileStrip'
 import { DetectionBoxes } from '@/components/overlay/DetectionBoxes'
 import { DirectionArrow } from '@/components/overlay/DirectionArrow'
 import { TelemetryOverlay } from '@/components/overlay/TelemetryOverlay'
 import { ToolPalette, type PanelId } from '@/components/panel/ToolPalette'
+import { PoweredOff } from '@/components/shell/ShutdownDialog'
 import { useDriveInput } from '@/input/useDriveInput'
+import { readError } from '@/lib/errors'
 import { saveRunJson, saveSnapshotLocally } from '@/lib/localSave'
 import { useRobot } from '@/robot/RobotProvider'
+import { useLiveTrail } from '@/robot/useLiveTrail'
 import { useRun } from '@/robot/useRun'
+import type { OriginDraft } from '@/components/map/geo'
 import type { DefectRegion, Run } from '@/robot/types'
 
 /**
  * The driving screen.
  *
- * The video is the floor and everything else floats on top of it. No panel
- * takes layout space away from the frame, because down a pipe the frame is the
- * only thing the operator can actually see with.
+ * The video is the floor and everything else floats on top of it, because down
+ * a pipe the frame is the only thing the operator can actually see with. The
+ * profile strip is the sole exception: 28 px of docked height, in exchange for
+ * never covering pipe wall with the answer to "have I already surveyed this?".
  *
  * There is no on-screen d-pad. Driving is keyboard or gamepad, and the only
  * trace of a command is a transient arrow — a control that took a corner of the
  * glass to duplicate a key would be paying for it in pipe.
  */
 export function LiveRoute() {
-  const { client, link, telemetry } = useRobot()
+  const { client, link, telemetry, disconnect } = useRobot()
 
   const [zoom, setZoom] = useState(1)
   const [ledLevel, setLedLevel] = useState(0)
@@ -40,6 +47,13 @@ export function LiveRoute() {
   const [showWalkthrough, setShowWalkthrough] = useState(false)
   const [starting, setStarting] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
+  const [finishing, setFinishing] = useState(false)
+  const [ending, setEnding] = useState(false)
+  const [endError, setEndError] = useState<string | null>(null)
+  const [halted, setHalted] = useState(false)
+  // The run closed but the shutdown did not. A state of its own because the
+  // dialog must stop offering to finish a run that is already finished.
+  const [runClosed, setRunClosed] = useState(false)
   // Bumped on each capture to retrigger the shutter flash.
   const [flash, setFlash] = useState(0)
   // The choices from the prompt, held while the preflight gate is up. Non-null
@@ -48,6 +62,7 @@ export function LiveRoute() {
     name: string
     record: boolean
     saveDir: FileSystemDirectoryHandle | null
+    origin: OriginDraft | null
   } | null>(null)
   // The folder to mirror this run into, once it has started. Null = robot only.
   const [saveDir, setSaveDir] = useState<FileSystemDirectoryHandle | null>(null)
@@ -67,11 +82,16 @@ export function LiveRoute() {
   const activeRunId = telemetry?.run.active ? telemetry.run.id : null
   const { run, refresh: refreshRun } = useRun(client, activeRunId)
 
+  // The map draws this rather than run.path. The robot's copy only reaches the
+  // console when something forces a refetch — a snapshot, a defect — so drawing
+  // it live produced straight lines hinged on the markers instead of a track.
+  const trail = useLiveTrail(activeRunId, telemetry?.motion.position ?? null, run?.path)
+
   // Driving is locked while any of these has the screen — including drawing,
   // where the operator is pointing at pipe wall rather than watching where the
   // robot is going, and a stray key would move it out from under the box.
   const modalOpen =
-    showShortcuts || showWalkthrough || preflight !== null || drawingRegion
+    showShortcuts || showWalkthrough || preflight !== null || drawingRegion || finishing
 
   const startDrawingRegion = useCallback(() => {
     // Always draw at 1x. Screen-to-frame mapping assumes the whole frame is on
@@ -103,6 +123,66 @@ export function LiveRoute() {
     }
   }, [client, activeRunId, refreshRun, saveDir])
 
+  // Ending is the last thing that touches the run, so the local mirror is
+  // rewritten after it rather than before: this is the only version of run.json
+  // that carries the final distance and the closing timestamp.
+  //
+  // The run is always closed first, even when the operator asked to shut down.
+  // /api/shutdown would close it too, but doing it here means a Pi that turns
+  // out to have no permission to halt still leaves a sealed, exported run.
+  const finishRun = useCallback(
+    async (thenShutDown: boolean) => {
+      if (!client) return
+      setEnding(true)
+      setEndError(null)
+
+      // Skipped when this is a retry of a failed shutdown: the run is already
+      // closed, and ending it again is a 409 that would read as a new fault.
+      if (!runClosed) {
+        if (!activeRunId) return
+        try {
+          await client.request(`/api/runs/${activeRunId}/end`, { method: 'POST' })
+          if (saveDir) {
+            try {
+              await saveRunJson(saveDir, client, activeRunId)
+            } catch {
+              // The run is closed and safe on the robot; the mirror is a copy.
+            }
+          }
+          setSaveDir(null)
+          setRunClosed(true)
+        } catch (caught) {
+          setEndError(readError(caught, 'could not finish the run'))
+          setEnding(false)
+          return
+        }
+      }
+
+      if (!thenShutDown) {
+        setFinishing(false)
+        setRunClosed(false)
+        setEnding(false)
+        await refreshRun()
+        return
+      }
+
+      try {
+        await client.request('/api/shutdown', { method: 'POST' })
+        setFinishing(false)
+        setHalted(true)
+        // Stop reconnecting to a Pi on its way down, or the banner spends the
+        // next minute calling a deliberate shutdown a fault.
+        disconnect()
+      } catch (caught) {
+        // The run is already safe. Say only what failed, and leave the dialog
+        // up so the operator knows not to reach for the switch.
+        setEndError(`Run finished, but it did not shut down: ${readError(caught)}`)
+        setEnding(false)
+      }
+    },
+    [client, activeRunId, saveDir, refreshRun, disconnect, runClosed],
+  )
+
   const toggleRecording = useCallback(async () => {
     if (!client || !telemetry) return
     const path = telemetry.recording.active
@@ -117,9 +197,14 @@ export function LiveRoute() {
 
   // Step one: the prompt opens the preflight gate rather than starting.
   const requestStart = useCallback(
-    (name: string, record: boolean, dir: FileSystemDirectoryHandle | null) => {
+    (
+      name: string,
+      record: boolean,
+      dir: FileSystemDirectoryHandle | null,
+      origin: OriginDraft | null,
+    ) => {
       setRunError(null)
-      setPreflight({ name, record, saveDir: dir })
+      setPreflight({ name, record, saveDir: dir, origin })
     },
     [],
   )
@@ -132,7 +217,11 @@ export function LiveRoute() {
     try {
       const { run } = await client.request<{ run: Run }>('/api/runs', {
         method: 'POST',
-        body: JSON.stringify({ name: preflight.name, record: preflight.record }),
+        body: JSON.stringify({
+          name: preflight.name,
+          record: preflight.record,
+          origin: preflight.origin,
+        }),
       })
       setSaveDir(preflight.saveDir)
       if (preflight.saveDir) {
@@ -151,9 +240,15 @@ export function LiveRoute() {
   const drive = useDriveInput({
     client,
     // Locked whenever a command could not be trusted to arrive, or a dialog has
-    // the keyboard. The server's watchdog is the backstop, not the mechanism.
+    // the keyboard. `armed` is the robot's own answer to "is a run open" — read
+    // from telemetry rather than inferred from run.active here, so the console
+    // shows the state the motors are actually in. The server enforces all of
+    // this independently; the watchdog is the backstop, not the mechanism.
     enabled:
-      !modalOpen && link.state === 'connected' && telemetry?.drive.hardware === true,
+      !modalOpen &&
+      link.state === 'connected' &&
+      telemetry?.drive.hardware === true &&
+      telemetry?.drive.armed === true,
     onSnapshot: () => void snapshot(),
   })
 
@@ -180,6 +275,10 @@ export function LiveRoute() {
     return () => window.removeEventListener('keydown', onKey)
   }, [drawingRegion])
 
+  // Before the client guard: shutting down clears the client, and a blank
+  // screen would drop the one instruction that keeps the SD card intact.
+  if (halted) return <PoweredOff />
+
   if (!client) return null
 
   return (
@@ -201,8 +300,28 @@ export function LiveRoute() {
               <AlertBanner alert={telemetry.alert} />
             </div>
 
+            {/* Top right, opposite the readout and clear of the palette. The
+                one control on the glass that ends something, so it is worded
+                as the outcome rather than as a verb on the run. */}
+            {telemetry.run.active && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEndError(null)
+                  setFinishing(true)
+                }}
+                className="panel absolute top-5 right-5 z-10 flex h-9 items-center rounded-panel px-3 text-[13px] text-ink-100 transition-colors hover:bg-white/10"
+              >
+                Finish run
+              </button>
+            )}
+
             <div className="absolute bottom-5 left-5 z-10">
-              <PipeMap path={run?.path ?? []} motion={telemetry.motion} />
+              <PipeMap
+                path={trail}
+                motion={telemetry.motion}
+                origin={run?.origin ?? null}
+              />
             </div>
 
             <div className="absolute right-5 bottom-5 z-10">
@@ -258,7 +377,31 @@ export function LiveRoute() {
               throttle={drive.throttle}
             />
 
-            {!telemetry.run.active && <StartRunPrompt onStart={requestStart} />}
+            {finishing && (
+              <FinishRunPrompt
+                run={run}
+                status={telemetry.run}
+                motion={telemetry.motion}
+                now={telemetry.at}
+                busy={ending}
+                error={endError}
+                runClosed={runClosed}
+                onConfirm={() => void finishRun(false)}
+                onConfirmAndShutdown={() => void finishRun(true)}
+                onCancel={() => {
+                  setFinishing(false)
+                  setEndError(null)
+                  setRunClosed(false)
+                }}
+              />
+            )}
+
+            {!telemetry.run.active && (
+              <StartRunPrompt
+                onStart={requestStart}
+                heading={telemetry.orientation.heading_deg}
+              />
+            )}
           </>
         )}
 
@@ -269,6 +412,16 @@ export function LiveRoute() {
           />
         )}
       </section>
+
+      {/* Only while a run is open. With no run there is no chainage that means
+          anything, and an axis of zeroes would be decoration. */}
+      {telemetry?.run.active && (
+        <ProfileStrip
+          client={client}
+          run={run}
+          chainage_m={telemetry.motion.chainage_m}
+        />
+      )}
 
       {preflight && (
         <Preflight

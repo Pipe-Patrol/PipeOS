@@ -67,7 +67,10 @@ class Robot:
             self.camera.available,
             self.lights.available,
             self.flow.available,
-            self.climate.available,
+            # State, not availability: the sensor takes a few seconds to
+            # produce its first reading, so `available` is False at this point
+            # even when it is wired and working.
+            self.climate.status()["state"],
         )
 
     def close(self, reason="shutdown"):
@@ -153,26 +156,52 @@ class Robot:
     def active_run_id(self):
         return self._active_run_id
 
-    def start_run(self, name="", record=False):
-        """Begin a run. Ends any run already open, so there is only ever one."""
+    def start_run(self, name="", record=False, origin=None):
+        """Begin a run. Ends any run already open, so there is only ever one.
+
+        `origin` is where the operator says the robot went in: {"lat", "lon",
+        "bearing_deg"}, or None when they did not place it. Everything the
+        odometer produces is relative to that point.
+        """
         if self._active_run_id is not None:
             self.end_run()
 
-        run = self.store.create(name)
+        run = self.store.create(name, origin=self._resolve_bearing(origin))
         self._active_run_id = run.id
         self._path_buffer = []
         self._path_dirty = False
         self._last_path_flush = time.monotonic()
         self.odometry.reset()
+        # Movement is a thing that belongs to a run. Nothing drives until here.
+        self.drive.arm(True, reason=f"run {run.id}")
 
         if record:
             self.recorder.start(run.id)
         return run
 
+    def _resolve_bearing(self, origin):
+        """Fill in the entry bearing the operator did not give.
+
+        If north has been set (hardware/imu.py set_north) the robot knows which
+        way it is pointing right now, and that is exactly the number wanted. If
+        it has not, the track is drawn as though the robot entered heading
+        north -- which is a guess, and the console says so rather than dressing
+        it up as a measurement.
+        """
+        if not isinstance(origin, dict) or origin.get("bearing_deg") is not None:
+            return origin
+        heading = self.imu.heading_deg
+        return {**origin, "bearing_deg": heading if heading is not None else 0.0}
+
     def end_run(self):
         if self._active_run_id is None:
             return None
         run_id = self._active_run_id
+
+        # Before anything that can fail. The run closing is the moment the
+        # robot must stop being drivable, and a store write throwing must not
+        # leave it armed.
+        self.drive.arm(False, reason="run ended")
 
         if self.recorder.active:
             self.recorder.stop()
@@ -203,6 +232,7 @@ class Robot:
         self._active_run_id = run_id
         self._path_buffer = list(run.path)
         self._path_dirty = False
+        self.drive.arm(True, reason=f"resumed run {run_id}")
         log.info("resumed interrupted run %s", run_id)
         return run
 

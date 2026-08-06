@@ -81,7 +81,6 @@ Worth checking:
     Are you both on the same network?
     Does the name resolve?                      ping $HOST
     Name won't resolve? deploy by IP:           ./deploy.sh pipepatrol@10.83.0.112
-    On a Mac, is your terminal allowed?         System Settings > Privacy & Security > Local Network
 EOF
   fi
   exit 1
@@ -132,7 +131,23 @@ echo "checking the safety limits before anything can drive:"
 .venv/bin/python -m pytest tests/test_drive_safety.py -q
 REMOTE
 
-# --- 5. service ---------------------------------------------------------------
+# --- 5. the DHT overlay -------------------------------------------------------
+# The temperature/humidity sensor is read by a kernel driver that a device tree
+# overlay loads, and an overlay is only applied at boot. Doing it here rather
+# than leaving it as a step in the README: the script that does the edit only
+# arrives on the Pi as part of this deploy, so "run it on the Pi first" is an
+# instruction that cannot be followed on a fresh SD card.
+#
+# Non-fatal on purpose. A robot with no DHT fitted should still deploy.
+
+step "Checking the DHT overlay"
+# `sudo bash <script>` rather than executing it: rsync carries the exec bit, but
+# only if the checkout it came from still had it, and that is one chmod away
+# from being someone else's problem at 2am.
+ssh -t "$TARGET" 'sudo bash ~/PipeOS/server/deploy/enable-dht.sh' \
+  || echo "Could not set the DHT overlay up. Climate will report absent; nothing else is affected."
+
+# --- 6. service ---------------------------------------------------------------
 
 if [ "$INSTALL_SERVICE" -eq 1 ]; then
   step "Installing and restarting the service"
@@ -150,6 +165,22 @@ if [ "$INSTALL_SERVICE" -eq 1 ]; then
         ~/PipeOS/server/deploy/pipepatrol.service > /tmp/pipepatrol.service
     sudo install -m 644 /tmp/pipepatrol.service /etc/systemd/system/pipepatrol.service
     rm -f /tmp/pipepatrol.service
+
+    # The one privilege the server gets: halting the Pi, so the console can shut
+    # it down properly instead of the operator flipping the switch and taking
+    # the SD card with it. visudo -c first — a malformed sudoers file locks
+    # every account on the Pi out of sudo, including the one fixing it.
+    sed -e "s|^pipepatrol |$USER |" \
+        ~/PipeOS/server/deploy/pipepatrol-poweroff.sudoers > /tmp/pipepatrol-poweroff
+    if sudo visudo -c -f /tmp/pipepatrol-poweroff >/dev/null; then
+      sudo install -m 440 -o root -g root \
+        /tmp/pipepatrol-poweroff /etc/sudoers.d/pipepatrol-poweroff
+    else
+      echo "WARNING: the poweroff sudoers rule did not validate; not installing it."
+      echo "         The shutdown button will report that it cannot halt the Pi."
+    fi
+    rm -f /tmp/pipepatrol-poweroff
+
     sudo systemctl daemon-reload
     sudo systemctl enable pipepatrol
     sudo systemctl restart pipepatrol

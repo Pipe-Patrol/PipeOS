@@ -1,5 +1,9 @@
 # Hardware
 
+The full pin reference, including where each number is defined and what happens
+when one is wrong, is in [PINMAP.md](PINMAP.md). The summary below is wiring
+context.
+
 ## Pin map
 
 **Drive** — Cytron MDD10A, sign-magnitude mode
@@ -19,6 +23,25 @@ top speed. **Stall current 3.85 A each** — see the safety note in the README.
 50 % duty in `hardware/lights.py`.
 
 **IMU** — BNO085 over I²C at `0x4A`, Qwiic on pins 1/3/5/9.
+
+**Air temperature / humidity** — DFRobot Gravity DHT22 (AM2302), one wire.
+
+As fitted:
+
+| Signal | BCM | Physical |
+|---|---|---|
+| VCC (red) | — | 4 (**5V**) |
+| GND (black) | — | 6 |
+| DATA (green) | GPIO14 | 8 |
+
+Pins 4, 6, 8 are three in a row, so a 3-way female housing plugs straight on
+without splitting it. GPIO14 is UART TX, so the serial console has to be off
+(`sudo raspi-config nonint do_serial_hw 1`) or it fights the driver.
+
+The module has its own pull-up, so no resistor is needed on the Pi side. That
+pull-up goes to whatever VCC is fed, so on 5 V the data line idles at 5 V into
+the data pin, which is not 5 V tolerant. 3V3 (pin 1 or 17) is also in spec for this
+module and avoids that.
 
 **Camera** — CSI ribbon via `picamera2`, or any USB camera via V4L2. CSI is tried
 first: a ribbon camera also appears as `/dev/video*` but delivers raw Bayer
@@ -53,6 +76,34 @@ dtparam=i2c_arm_baudrate=50000
 ```
 
 Confirm with `i2cdetect -y 1` — expect `4a`.
+
+### The overlay the DHT22 needs
+
+The DHT is read by the kernel's `dht11` IIO driver, not from Python — the
+protocol's pulses are 26–70 µs apart and no userspace library times that
+reliably on a Pi 5 (the reasoning, and what was tried, is at the top of
+`hardware/climate.py`). That driver is loaded by a device tree overlay, and an
+overlay is only applied at boot:
+
+`deploy.sh` does this for you — the script lives on the Pi only once a deploy has
+put it there, so it cannot be a prerequisite step. To do it by hand, on the Pi
+and after at least one deploy:
+
+```bash
+sudo bash ~/PipeOS/server/deploy/enable-dht.sh 14   # adds dtoverlay=dht11,gpiopin=14
+sudo reboot
+```
+
+The overlay is named for the DHT11 but decodes the DHT22/AM2302 frame too —
+there is no separate `dht22` overlay to look for. After the reboot:
+
+```bash
+cd ~/PipeOS/server && .venv/bin/python -m pipepatrol.hardware.climate
+```
+
+That prints a live reading every few seconds, or says which of the overlay, the
+power and the wire is the problem. Failed reads are normal — a healthy DHT
+times out regularly, and the console only blanks after 30 s of silence.
 
 ## The two sensors that are not fitted
 

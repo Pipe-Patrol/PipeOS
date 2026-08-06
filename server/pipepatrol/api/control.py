@@ -14,6 +14,7 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from pipepatrol import config
@@ -29,6 +30,12 @@ class LedRequest(BaseModel):
     level: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class NorthRequest(BaseModel):
+    """The true bearing the robot is facing at the moment of the call."""
+
+    facing_deg: float = Field(default=0.0, ge=0.0, lt=360.0)
+
+
 @router.post("/api/stop")
 async def post_stop(robot=Depends(get_robot)):
     """Immediate all-stop. No dependency on the WebSocket, by design."""
@@ -40,6 +47,32 @@ async def post_stop(robot=Depends(get_robot)):
 async def post_led(payload: LedRequest, robot=Depends(get_robot)):
     applied = robot.lights.set_level(payload.level)
     return {"ok": True, "level": applied, "lights": robot.lights.status()}
+
+
+@router.post("/api/north")
+async def post_north(payload: NorthRequest, robot=Depends(get_robot)):
+    """Anchor the IMU's yaw to a real compass bearing.
+
+    Point the robot at a known direction, then call this with that direction.
+    Nothing on the robot can measure it -- the IMU has no magnetometer -- so
+    this is the only way a heading becomes a bearing.
+
+    409 when there is no yaw to anchor to, which means no IMU: a reference
+    against nothing would read as set and be meaningless.
+    """
+    reference = robot.imu.set_north(payload.facing_deg)
+    if reference is None:
+        return JSONResponse(
+            {"error": "no IMU reading to anchor north to"}, status_code=409
+        )
+    return {"ok": True, "north": reference}
+
+
+@router.delete("/api/north")
+async def delete_north(robot=Depends(get_robot)):
+    """Forget the reference. Headings go back to being relative to power-on."""
+    robot.imu.clear_north()
+    return {"ok": True, "north": robot.imu.status()["north"]}
 
 
 @router.websocket("/ws")

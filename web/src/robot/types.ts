@@ -12,6 +12,8 @@
  * mistake a derived number for a measured one, or a blank for a zero.
  */
 
+import type { Origin } from '@/components/map/geo'
+
 export type Quality = 'measured' | 'estimated' | 'unavailable'
 
 /** IMU health. `degraded` still carries values; `absent` never does. */
@@ -22,6 +24,12 @@ export interface DriveStatus {
   right_duty: number
   commanded_speed_m_s: number
   moving: boolean
+  /**
+   * False until a run is open. The robot refuses every drive command while it
+   * is false — see hardware/drive.py — so this is the state of the motors, not
+   * a hint about the UI.
+   */
+  armed: boolean
   run_seconds: number
   run_limit_tripped: boolean
   last_stop_reason: string | null
@@ -41,6 +49,15 @@ export interface Orientation {
    */
   yaw_deg: number | null
   yaw_is_relative: true
+  /**
+   * Absolute compass bearing, 0..360. Null until an operator has set the north
+   * reference from Settings, and null again if the IMU reconnects and
+   * invalidates it — never a silent fall back to the relative yaw.
+   */
+  heading_deg: number | null
+  north_set: boolean
+  /** Set once, then the sensor restarted. It has to be done again. */
+  north_stale: boolean
   accel_m_s2: number | null
   state: SensorState
 }
@@ -57,8 +74,12 @@ export interface Motion {
   uncertainty_m: number
   heading_deg: number
   position: { x: number; y: number }
-  /** Which estimator produced the current speed. */
-  source: 'fused' | 'duty' | 'stopped'
+  /**
+   * Which estimator produced the current speed. The `inertial` pair integrate
+   * IMU acceleration; the others are the fallback when no accelerometer is
+   * fitted. See estimation/odometry.py.
+   */
+  source: 'inertial' | 'inertial+flow' | 'fused' | 'duty' | 'stopped'
   /** Wheels turning, picture not. */
   slipping: boolean
   calibrated: boolean
@@ -229,6 +250,12 @@ export interface RunSummary {
   started_at: number
   ended_at: number | null
   duration_s: number
+  /**
+   * Where the operator placed the run on a map, and which way the robot faced
+   * going in. Null when they did not — the track is then drawn in its own local
+   * frame with no map behind it. See components/map/geo.ts.
+   */
+  origin: Origin | null
   distance_m: number
   uncertainty_m: number
   /** Never ended — a crash or a power cut. Offered back to the operator. */

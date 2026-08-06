@@ -31,7 +31,7 @@ export function BudgetStrip({ power, motion }: BudgetStripProps) {
       </Reading>
 
       <Reading label="Out">
-        {format.metresWithError(Math.abs(motion.chainage_m), motion.uncertainty_m)}
+        {format.metres(Math.abs(motion.chainage_m))}
       </Reading>
     </div>
   )

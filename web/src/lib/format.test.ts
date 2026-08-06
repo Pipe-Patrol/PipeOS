@@ -13,7 +13,7 @@ describe('missing values', () => {
     'metres',
     'speed',
     'degrees',
-    'celsius',
+    'temperature',
     'percent',
     'milliseconds',
     'acceleration',
@@ -40,20 +40,6 @@ describe('missing values', () => {
   })
 })
 
-describe('metresWithError', () => {
-  it('carries the uncertainty', () => {
-    expect(format.metresWithError(12.44, 1.13)).toBe('12.4 ±1.1 m')
-  })
-
-  it('drops an uncertainty too small to matter', () => {
-    expect(format.metresWithError(12.4, 0.01)).toBe('12.4 m')
-  })
-
-  it('is blank when the value is missing, whatever the error says', () => {
-    expect(format.metresWithError(null, 1.1)).toBe(format.BLANK)
-  })
-})
-
 describe('duration', () => {
   it('reads as a clock', () => {
     expect(format.duration(0)).toBe('0:00')
@@ -75,6 +61,34 @@ describe('bytes', () => {
     expect(format.bytes(512)).toBe('512 B')
     expect(format.bytes(2048)).toBe('2.0 KB')
     expect(format.bytes(5 * 1024 ** 3)).toBe('5.0 GB')
+  })
+})
+
+describe('temperature', () => {
+  it('shows the value it was given when the scale is Celsius', () => {
+    expect(format.temperature(21.4)).toBe('21°C')
+    expect(format.temperature(21.4, 'C')).toBe('21°C')
+  })
+
+  it('converts to Fahrenheit for display', () => {
+    expect(format.temperature(0, 'F')).toBe('32°F')
+    expect(format.temperature(100, 'F')).toBe('212°F')
+    expect(format.temperature(21.4, 'F')).toBe('71°F')
+  })
+
+  it('converts below freezing, where dropping the sign would be a lie', () => {
+    expect(format.temperature(-40, 'F')).toBe('-40°F')
+    expect(format.temperature(-12.3, 'C')).toBe('-12°C')
+  })
+
+  it('always names the scale, so no reading is ambiguous', () => {
+    expect(format.temperature(20, 'C')).toContain('C')
+    expect(format.temperature(20, 'F')).toContain('F')
+  })
+
+  it('stays blank in either scale when there is no reading', () => {
+    expect(format.temperature(null, 'F')).toBe(format.BLANK)
+    expect(format.temperature(Number.NaN, 'F')).toBe(format.BLANK)
   })
 })
 
