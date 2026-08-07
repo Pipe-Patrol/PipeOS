@@ -2,29 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 
 import { Button } from '@/components/primitives/Button'
-import {
-  compassPoint,
-  normaliseBearing,
-  type OriginDraft,
-} from '@/components/map/geo'
-import { pin, useLeaflet } from '@/components/map/useLeaflet'
+import type { OriginDraft } from '@/components/map/geo'
+import { MAX_ZOOM, pin, useLeaflet } from '@/components/map/useLeaflet'
 
 interface EntryPointPickerProps {
   value: OriginDraft | null
   onChange: (origin: OriginDraft | null) => void
-  /**
-   * The robot's own compass bearing right now, or null if north has not been
-   * set in Settings. Offered as the entry bearing, since the robot is normally
-   * sitting at the manhole pointing the way it is about to go.
-   */
-  heading: number | null
 }
 
 /** Nowhere in particular. Only ever seen before a location is placed. */
 const FALLBACK_CENTRE: [number, number] = [51.5072, -0.1276]
 
 /**
- * Where the robot went in, and which way it was pointing.
+ * Where the robot went in.
  *
  * There is no GPS on the robot, and there would be no signal for one down a
  * pipe, so this is the operator's own claim rather than a measurement. It is
@@ -33,37 +23,32 @@ const FALLBACK_CENTRE: [number, number] = [51.5072, -0.1276]
  *
  * Three ways in, because in a van at 7am any one of them can be the broken one:
  *
+ *   this device    browser geolocation, asked for as soon as the panel opens
  *   the map        click it. Needs tiles, so needs a network
- *   this device    browser geolocation. Needs permission and a fix
  *   the boxes      type the numbers off a site plan. Always works
  *
- * The bearing is separate because nothing can measure it: the IMU has no
- * magnetometer (see hardware/imu.py), so unless the operator says which way the
- * robot faced, the track is drawn as though it entered heading north.
+ * It opens at the tightest zoom the tiles go to. A robot works a length of pipe
+ * between two manholes, so the useful question is which cover on this street,
+ * not which street — and starting zoomed out means every operator pinches in
+ * before they can answer it.
+ *
+ * The entry BEARING is not here. It comes from the north reference below, which
+ * is the only thing that can produce one: nothing on the robot measures a
+ * compass direction, so asking for the same fact in two places would let them
+ * disagree.
  */
-export function EntryPointPicker({
-  value,
-  onChange,
-  heading,
-}: EntryPointPickerProps) {
+export function EntryPointPicker({ value, onChange }: EntryPointPickerProps) {
   const { containerRef, map, tiles } = useLeaflet({
     centre: value ? [value.lat, value.lon] : FALLBACK_CENTRE,
+    zoom: MAX_ZOOM,
   })
   const markerRef = useRef<L.CircleMarker | null>(null)
   const [locating, setLocating] = useState(false)
   const [locateError, setLocateError] = useState<string | null>(null)
 
-  // Held in a ref so the click handler is bound once and still sees the current
-  // bearing. Rebinding it on every keystroke in the bearing box would drop
-  // clicks in the window between removing the old listener and adding the new.
-  const bearingRef = useRef<number | null>(value?.bearing_deg ?? null)
-  useEffect(() => {
-    bearingRef.current = value?.bearing_deg ?? null
-  })
-
   const place = useCallback(
     (lat: number, lon: number) => {
-      onChange({ lat, lon, bearing_deg: bearingRef.current })
+      onChange({ lat, lon, bearing_deg: null })
     },
     [onChange],
   )
@@ -100,9 +85,9 @@ export function EntryPointPicker({
     if (!map.getBounds().contains(at)) map.panTo(at)
   }, [map, value])
 
-  const useThisDevice = () => {
+  const locate = useCallback(() => {
     if (!navigator.geolocation) {
-      setLocateError('This browser has no location service')
+      setLocateError('This browser cannot look up your location.')
       return
     }
     setLocating(true)
@@ -112,7 +97,7 @@ export function EntryPointPicker({
         setLocating(false)
         const { latitude, longitude } = position.coords
         place(latitude, longitude)
-        map?.setView([latitude, longitude], map.getZoom())
+        map?.setView([latitude, longitude], MAX_ZOOM)
       },
       (error) => {
         setLocating(false)
@@ -120,70 +105,82 @@ export function EntryPointPicker({
         // fix, "unavailable" means go and type the numbers instead.
         setLocateError(
           error.code === error.PERMISSION_DENIED
-            ? 'Location permission refused — type the coordinates instead'
-            : 'No location fix — type the coordinates instead',
+            ? 'This browser would not share your location, so you will need to type the coordinates in below.'
+            : 'Your location could not be found, so you will need to type the coordinates in below.',
         )
       },
       { enableHighAccuracy: true, timeout: 10_000 },
     )
-  }
+  }, [map, place])
 
-  const setField = (field: 'lat' | 'lon' | 'bearing_deg', raw: string) => {
+  // Asked for once, as soon as the map exists. The robot is almost always at
+  // the manhole the console is standing next to, so the first guess is nearly
+  // always right and an operator who has to press a button for it is an
+  // operator who files half their runs with no location at all.
+  const asked = useRef(false)
+  useEffect(() => {
+    if (!map || asked.current || value) return
+    asked.current = true
+    locate()
+  }, [map, value, locate])
+
+  const setField = (field: 'lat' | 'lon', raw: string) => {
     const parsed = Number(raw)
     // A half-typed "-" or "51." is not a coordinate yet. Ignoring it leaves the
     // last good value in place rather than resetting the box under the cursor.
     if (raw.trim() === '' || !Number.isFinite(parsed)) return
     const base: OriginDraft = value ?? { lat: 0, lon: 0, bearing_deg: null }
-    onChange({
-      ...base,
-      [field]: field === 'bearing_deg' ? normaliseBearing(parsed) : parsed,
-    })
+    onChange({ ...base, [field]: parsed })
   }
-
-  // What the run will actually be filed with: what was typed, else what the
-  // robot knows, else north. Shown so the compass label under the box is never
-  // describing a different number from the one that gets used.
-  const effectiveBearing = value?.bearing_deg ?? heading ?? 0
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="label">Entry point</span>
-        <span className="text-[11px] text-ink-500">
-          {value ? 'Click the map to move it' : 'Optional — click the map'}
+        <span className="text-[13px] text-ink-100">Entry point</span>
+        <span className="text-[11.5px] text-ink-500">
+          {value ? 'Click the map to move the pin' : 'Optional, click the map to place a pin'}
         </span>
       </div>
 
-      <div className="relative overflow-hidden rounded-panel border border-ink-800">
-        <div ref={containerRef} className="h-[180px] w-full bg-ink-900" />
+      <div className="overflow-hidden rounded-panel border border-ink-800">
+        <div className="relative">
+          <div ref={containerRef} className="h-[180px] w-full bg-ink-900" />
 
-        {tiles === 'unavailable' && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-ink-1000/80 px-2 py-1 text-[11px] text-ink-400">
-            No map tiles — offline. Clicking and the boxes below still work.
-          </div>
-        )}
-      </div>
+          {tiles === 'unavailable' && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-ink-1000/80 px-2 py-1 text-[11px] text-ink-400">
+              The map could not load, but you can still type the coordinates below.
+            </div>
+          )}
+        </div>
 
-      <div className="flex items-center gap-2">
-        <Button type="button" variant="quiet" onClick={useThisDevice} disabled={locating}>
-          {locating ? 'Locating…' : 'Use this device'}
-        </Button>
-        {value && (
-          <Button type="button" variant="quiet" onClick={() => onChange(null)}>
-            Clear
+        {/* Docked to the map rather than floated under it: these two act on the
+            map and nothing else, and a gap here read as a gap between sections. */}
+        <div className="flex items-center gap-1 border-t border-ink-800 bg-ink-950/60 px-1.5 py-1">
+          <Button
+            type="button"
+            variant="quiet"
+            onClick={locate}
+            disabled={locating}
+            className="h-7 px-2 text-[12px]"
+          >
+            {locating ? 'Locating' : 'Use this device'}
           </Button>
-        )}
+          {value && (
+            <Button
+              type="button"
+              variant="quiet"
+              onClick={() => onChange(null)}
+              className="h-7 px-2 text-[12px]"
+            >
+              Clear
+            </Button>
+          )}
+        </div>
       </div>
 
-      {locateError && <p className="text-[11px] text-ink-400">{locateError}</p>}
+      {locateError && <p className="text-[11.5px] text-ink-400">{locateError}</p>}
 
-      <p className="text-[11px] text-ink-500">
-        {heading === null
-          ? 'No north reference — the track is drawn as though the robot entered heading north. Set north in Settings to fill this in from the robot.'
-          : `Robot is reading ${Math.round(heading)}° ${compassPoint(heading)}. Leave the box empty to use that.`}
-      </p>
-
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <Field
           label="Latitude"
           value={value ? value.lat.toFixed(5) : ''}
@@ -194,12 +191,6 @@ export function EntryPointPicker({
           value={value ? value.lon.toFixed(5) : ''}
           onChange={(raw) => setField('lon', raw)}
         />
-        <Field
-          label={`Facing ${compassPoint(effectiveBearing)}`}
-          value={value?.bearing_deg != null ? String(Math.round(value.bearing_deg)) : ''}
-          onChange={(raw) => setField('bearing_deg', raw)}
-          placeholder={heading === null ? '0' : String(Math.round(heading))}
-        />
       </div>
     </div>
   )
@@ -209,20 +200,17 @@ function Field({
   label,
   value,
   onChange,
-  placeholder,
 }: {
   label: string
   value: string
   onChange: (raw: string) => void
-  placeholder?: string
 }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      <span className="label">{label}</span>
+      <span className="text-[11.5px] text-ink-400">{label}</span>
       <input
         value={value}
         inputMode="decimal"
-        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         className="h-8 w-full rounded-panel border border-ink-800 bg-white/5 px-2 text-[12px] tnum text-ink-100 placeholder:text-ink-500 focus:border-white/35 focus:outline-none"
       />

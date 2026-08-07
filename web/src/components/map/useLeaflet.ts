@@ -25,6 +25,9 @@ const ATTRIBUTION = '© OpenStreetMap'
 /** Close enough to see a manhole cover, far enough to recognise the street. */
 export const DEFAULT_ZOOM = 18
 
+/** As tight as OpenStreetMap's tiles go. The entry point picker opens here. */
+export const MAX_ZOOM = 19
+
 interface Options {
   centre: [number, number]
   zoom?: number
@@ -61,7 +64,7 @@ export function useLeaflet({ centre, zoom = DEFAULT_ZOOM, interactive = true }: 
 
     const layer = L.tileLayer(TILE_URL, {
       attribution: ATTRIBUTION,
-      maxZoom: 19,
+      maxZoom: MAX_ZOOM,
       // Blank rather than a broken-image glyph repeated across the viewport.
       errorTileUrl:
         'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',

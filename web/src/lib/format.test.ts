@@ -40,6 +40,18 @@ describe('missing values', () => {
   })
 })
 
+describe('degrees', () => {
+  it('has no signed zero, which reads as a fault in a column of readings', () => {
+    expect(format.degrees(-0.4)).toBe('0°')
+    expect(format.degrees(0)).toBe('0°')
+  })
+
+  it('keeps the sign on a reading that has one', () => {
+    expect(format.degrees(-12.4)).toBe('-12°')
+    expect(format.degrees(92)).toBe('92°')
+  })
+})
+
 describe('duration', () => {
   it('reads as a clock', () => {
     expect(format.duration(0)).toBe('0:00')

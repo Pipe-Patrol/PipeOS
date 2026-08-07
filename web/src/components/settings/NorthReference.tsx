@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { Button } from '@/components/primitives/Button'
+import { SettingRow } from '@/components/live/runsetup/SettingRow'
 import { compassPoint, normaliseBearing } from '@/components/map/geo'
 import { readError } from '@/lib/errors'
 import type { RobotClient } from '@/robot/client'
@@ -9,6 +10,8 @@ import type { Orientation } from '@/robot/types'
 interface NorthReferenceProps {
   client: RobotClient
   orientation: Orientation | null
+  /** The heading above the control. Rendered here so the hint can sit beside it. */
+  title?: string
 }
 
 /**
@@ -30,14 +33,30 @@ interface NorthReferenceProps {
  * makes the old datum meaningless. That is reported as stale and the heading
  * goes back to blank, because a compass wrong by an unknown amount is worse
  * than no compass.
+ *
+ * This lives in two places: Settings, where it is a property of the robot, and
+ * the run setup panel, where it is the thing standing between the operator and
+ * a track drawn in the wrong direction. Same control, one implementation.
  */
-export function NorthReference({ client, orientation }: NorthReferenceProps) {
+export function NorthControl({
+  client,
+  orientation,
+  title = 'North reference',
+}: NorthReferenceProps) {
   const [facing, setFacing] = useState('0')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const noSensor = !orientation || orientation.state === 'absent'
   const heading = orientation?.heading_deg ?? null
+
+  const instructions = noSensor
+    ? 'There is no IMU fitted, so the robot has no sense of which way it is turning and a bearing cannot be anchored to anything.'
+    : orientation?.north_stale
+      ? 'The IMU has restarted, which means the reference you set earlier no longer lines up with anything. Point the robot north again and press Set.'
+      : orientation?.north_set
+        ? 'Every heading shown is now a compass bearing, and this run will take the direction it went in from the reading above.'
+        : 'Point the robot north and press Set, or type in the bearing it is facing if you already know it. Without a north reference the track cannot be placed on a map.'
 
   const set = async () => {
     setBusy(true)
@@ -67,59 +86,68 @@ export function NorthReference({ client, orientation }: NorthReferenceProps) {
   }
 
   return (
-    <section className="panel p-4">
-      <h2 className="label mb-3">North</h2>
+    <div className="flex flex-col gap-2.5">
+      <SettingRow
+        label={title}
+        info={instructions}
+        hint={
+          noSensor
+            ? undefined
+            : orientation?.north_stale
+              ? 'The IMU has restarted, so this needs setting again'
+              : orientation?.north_set
+                ? undefined
+                : 'Not set, so this run will have no map behind its track'
+        }
+      >
+        <span
+          className={`text-[12px] tnum ${
+            heading === null ? 'text-ink-500' : 'text-ink-200'
+          }`}
+        >
+          {heading === null
+            ? 'Not set'
+            : `${Math.round(heading)}° ${compassPoint(heading)}`}
+        </span>
+      </SettingRow>
 
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="min-w-0">
-          <div className="label">Heading now</div>
-          <div className="mt-1 text-[20px] tnum">
-            {heading === null ? (
-              <span className="text-ink-500">—</span>
-            ) : (
-              <>
-                {Math.round(heading)}°{' '}
-                <span className="text-[13px] text-ink-400">
-                  {compassPoint(heading)}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-end gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="label">Robot is facing</span>
-            <input
-              value={facing}
-              inputMode="decimal"
-              onChange={(event) => setFacing(event.target.value)}
-              aria-label="Bearing the robot is currently facing, in degrees"
-              className="h-9 w-20 rounded-panel border border-ink-800 bg-white/5 px-2 text-[13px] tnum text-ink-100 focus:border-white/35 focus:outline-none"
-            />
-          </label>
-          <Button onClick={() => void set()} disabled={busy || noSensor}>
-            Set
+      <SettingRow label="Robot is facing">
+        <input
+          value={facing}
+          inputMode="decimal"
+          onChange={(event) => setFacing(event.target.value)}
+          aria-label="Bearing the robot is currently facing, in degrees"
+          className="h-8 w-16 rounded-panel border border-ink-800 bg-white/5 px-2 text-[12px] tnum text-ink-100 focus:border-white/35 focus:outline-none"
+        />
+        <Button
+          onClick={() => void set()}
+          disabled={busy || noSensor}
+          className="h-8 px-3 text-[12px]"
+        >
+          Set
+        </Button>
+        {orientation?.north_set && (
+          <Button
+            variant="quiet"
+            onClick={() => void clear()}
+            disabled={busy}
+            className="h-8 px-2 text-[12px]"
+          >
+            Clear
           </Button>
-          {orientation?.north_set && (
-            <Button variant="quiet" onClick={() => void clear()} disabled={busy}>
-              Clear
-            </Button>
-          )}
-        </div>
-      </div>
+        )}
+      </SettingRow>
 
-      <p className="mt-3 text-[12px] text-ink-400">
-        {noSensor
-          ? 'No IMU fitted — there is no yaw to anchor a bearing to.'
-          : orientation?.north_stale
-            ? 'The IMU restarted, so the old reference no longer means anything. Set it again.'
-            : orientation?.north_set
-              ? 'Headings are compass bearings. New runs take their entry bearing from this.'
-              : 'Point the robot at a known bearing — 0 for north — and press Set. Until then the map draws every run as though it entered heading north.'}
-      </p>
+      {error && <p className="text-[11.5px] text-state-fault-signal">{error}</p>}
+    </div>
+  )
+}
 
-      {error && <p className="mt-2 text-[12px] text-state-fault-signal">{error}</p>}
+/** The Settings card. The control above, in the panel the rest of that page uses. */
+export function NorthReference(props: NorthReferenceProps) {
+  return (
+    <section className="panel p-4">
+      <NorthControl {...props} title="North" />
     </section>
   )
 }

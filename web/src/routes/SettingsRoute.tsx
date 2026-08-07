@@ -2,14 +2,13 @@ import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 
 import { Page } from '@/components/shell/Page'
+import { ShortcutList } from '@/components/live/ShortcutList'
 import { Button } from '@/components/primitives/Button'
 import { NorthReference } from '@/components/settings/NorthReference'
 import { PoweredOff, ShutdownDialog } from '@/components/shell/ShutdownDialog'
 import * as format from '@/lib/format'
 import { useTempUnit } from '@/lib/units'
 import { useRobot } from '@/robot/RobotProvider'
-
-const WALKTHROUGH_KEY = 'pipepatrol.walkthroughDismissed'
 
 /**
  * What this robot is, and what it cannot tell you.
@@ -85,6 +84,13 @@ export function SettingsRoute() {
 
       <NorthReference client={client} orientation={telemetry?.orientation ?? null} />
 
+      {/* The reference copy. `?` puts the same list over the video mid-run;
+          this is where someone reads it before they are driving. */}
+      <section className="panel p-4">
+        <h2 className="label mb-3">Shortcuts</h2>
+        <ShortcutList />
+      </section>
+
       <section className="panel p-4">
         <h2 className="label mb-3">Storage</h2>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
@@ -128,19 +134,6 @@ export function SettingsRoute() {
             ))}
           </div>
         </div>
-
-        <Button
-          variant="quiet"
-          onClick={() => {
-            try {
-              window.localStorage.removeItem(WALKTHROUGH_KEY)
-            } catch {
-              // Private browsing. It shows on every run there anyway.
-            }
-          }}
-        >
-          Show walkthrough again
-        </Button>
       </section>
 
       {confirming && (
