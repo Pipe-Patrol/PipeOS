@@ -100,6 +100,23 @@ export function useLeaflet({ centre, zoom = DEFAULT_ZOOM, interactive = true }: 
  * and which would be a second thing to fail with no network. A vector circle
  * has no assets behind it at all.
  */
+/**
+ * A theme colour, as a string Leaflet can actually use.
+ *
+ * Leaflet writes its colours into SVG presentation attributes, which do not
+ * understand `var(--color-track)`. Rather than keep a second copy of the
+ * palette in TypeScript — where it would quietly drift from index.css the first
+ * time someone retunes a colour — the value is read back off the document.
+ * The fallback covers the one case where there is no document to read.
+ */
+export function mapColour(token: string, fallback: string): string {
+  if (typeof document === 'undefined') return fallback
+  const value = getComputedStyle(document.documentElement)
+    .getPropertyValue(token)
+    .trim()
+  return value || fallback
+}
+
 export function pin(latlng: L.LatLngExpression, colour: string): L.CircleMarker {
   return L.circleMarker(latlng, {
     radius: 6,
@@ -107,5 +124,48 @@ export function pin(latlng: L.LatLngExpression, colour: string): L.CircleMarker 
     weight: 2,
     fillColor: colour,
     fillOpacity: 0.85,
+  })
+}
+
+/**
+ * Where the run went in, as a helipad H.
+ *
+ * Same badge the longitudinal strip draws at chainage zero — see `.home-badge`
+ * in index.css, which both of them render. The two views have to agree about
+ * which mark means "the way out", and the cheapest way to guarantee that is for
+ * there to be exactly one definition of it.
+ *
+ * A divIcon rather than an image: the stock Leaflet marker is a PNG resolved
+ * relative to the CSS, and there may be no network at all down a manhole.
+ */
+export function homeMarker(latlng: L.LatLngExpression): L.Marker {
+  return L.marker(latlng, {
+    icon: L.divIcon({
+      className: '',
+      html: '<span class="home-badge">H</span>',
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    }),
+    // Non-interactive: this map sits on the driving screen and nothing on it
+    // should swallow a click meant for the video behind it.
+    interactive: false,
+    keyboard: false,
+    // Above the track, below the live position.
+    zIndexOffset: 100,
+  })
+}
+
+/** Where the robot is now — the pulsing blue mark, shared with the strip. */
+export function positionMarker(latlng: L.LatLngExpression): L.Marker {
+  return L.marker(latlng, {
+    icon: L.divIcon({
+      className: '',
+      html: '<span class="position-dot"></span>',
+      iconSize: [10, 10],
+      iconAnchor: [5, 5],
+    }),
+    interactive: false,
+    keyboard: false,
+    zIndexOffset: 200,
   })
 }

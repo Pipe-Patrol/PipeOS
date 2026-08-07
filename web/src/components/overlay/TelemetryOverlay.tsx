@@ -14,6 +14,14 @@ interface TelemetryOverlayProps {
  * defect is filed against a chainage. The host and link vitals live in the top
  * bar; this stays down to what an operator watches while driving.
  *
+ * IT IS DISTANCE FROM THE ENTRY POINT, NOT THE ODOMETER. Those are the same
+ * number only until the robot first reverses, and after that the odometer keeps
+ * counting while the robot comes back towards the operator — so a run that had
+ * gone in and out twice read "80 m" while sitting 20 m from the manhole. Every
+ * defect on this run is filed against chainage, the return budget is priced off
+ * chainage, and the map's H is drawn at chainage zero; the biggest number on
+ * the glass had no business being the one quantity that disagreed with them.
+ *
  * DISTANCE AND THE RUN CLOCK SHARE ONE CENTRE LINE. Air and humidity hang off
  * that line rather than sitting in it: they are conditions, not measurements of
  * the robot, and a three-up row centred as a group would drag the clock off
@@ -35,7 +43,7 @@ export function TelemetryOverlay({ telemetry }: TelemetryOverlayProps) {
     <div className="flex flex-col items-center gap-3">
       <Readout
         label="Distance"
-        value={format.metres(motion.distance_travelled_m)}
+        value={format.metres(Math.abs(motion.chainage_m))}
         detail={format.acceleration(motion.accel_m_s2)}
         quality="estimated"
         size="lg"

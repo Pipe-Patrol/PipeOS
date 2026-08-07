@@ -1,8 +1,14 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import L from 'leaflet'
 
 import { project, projectPath, type Origin } from '@/components/map/geo'
-import { pin, useLeaflet } from '@/components/map/useLeaflet'
+import {
+  DEFAULT_ZOOM,
+  homeMarker,
+  mapColour,
+  positionMarker,
+  useLeaflet,
+} from '@/components/map/useLeaflet'
 import * as format from '@/lib/format'
 import type { TrailPoint } from '@/robot/useLiveTrail'
 
@@ -14,20 +20,32 @@ interface GeoTraceMapProps {
   head?: { x: number; y: number } | null
   height?: number
   interactive?: boolean
+  /**
+   * Fill the box: no border, no rounding, no caption. This is how it is drawn
+   * on the driving screen, where the map IS the panel rather than a picture
+   * inside one, and every pixel of chrome is a pixel of street not shown.
+   */
+  bare?: boolean
+  /** Controls floated over the map — the return-home button on the live screen. */
+  children?: ReactNode
 }
 
 /**
  * The track, on the actual street it was driven under.
  *
- * Every metre of this is still dead reckoning — see PathMap, which draws the
- * same track with no map behind it. Putting it over tiles adds exactly one
- * thing: the operator's own claim about where the robot went in, and which way
- * it was pointing. It does not make the track a survey, and the line is drawn
- * thin and unadorned for the same reason it is there.
+ * Every metre of this is dead reckoning — see PathMap, which draws the same
+ * track with no map behind it. Putting it over tiles adds exactly one thing:
+ * the operator's own claim about where the robot went in, and which way it was
+ * pointing. It does not make the track a survey.
+ *
+ * THREE MARKS, AND THE LONGITUDINAL STRIP DRAWS THE SAME THREE. An H at the
+ * entry, a bright line for where the robot has been, a pulsing blue dot for
+ * where it is. The strip under the video is this same run flattened onto one
+ * axis, and an operator glancing between the two must not have to translate.
  *
  * The heading the whole thing hangs off has no magnetometer behind it, so a
  * turn the IMU drifted through rotates everything after it. That error is
- * cumulative and it is why there is no grid, no scale bar and no north arrow.
+ * cumulative, and it is why there is still no grid and no scale bar.
  */
 export function GeoTraceMap({
   origin,
@@ -35,6 +53,8 @@ export function GeoTraceMap({
   head = null,
   height = 260,
   interactive = true,
+  bare = false,
+  children,
 }: GeoTraceMapProps) {
   const { containerRef, map, tiles } = useLeaflet({
     centre: [origin.lat, origin.lon],
@@ -59,21 +79,17 @@ export function GeoTraceMap({
     return [lat, lon]
   }, [origin, head])
 
-  const entryRef = useRef<L.CircleMarker | null>(null)
   const lineRef = useRef<L.Polyline | null>(null)
-  const noseRef = useRef<L.CircleMarker | null>(null)
+  const noseRef = useRef<L.Marker | null>(null)
 
   // Where the operator said the robot went in. Drawn once, and drawn even
   // before there is any track: it is the one point on here that is not an
-  // estimate.
+  // estimate, and the one an operator looks for to answer "how do I get out".
   useEffect(() => {
     if (!map) return
-    const marker = pin([origin.lat, origin.lon], '#ff4d4d').addTo(map)
-    marker.bindTooltip('Entry', { direction: 'top' })
-    entryRef.current = marker
+    const marker = homeMarker([origin.lat, origin.lon]).addTo(map)
     return () => {
       marker.remove()
-      entryRef.current = null
     }
   }, [map, origin.lat, origin.lon])
 
@@ -87,22 +103,37 @@ export function GeoTraceMap({
       return
     }
 
+    const colour = mapColour('--color-track', '#39ff88')
     if (lineRef.current) {
       lineRef.current.setLatLngs(track)
     } else {
       lineRef.current = L.polyline(track, {
-        color: '#ffffff',
-        weight: 2,
-        opacity: 0.85,
+        color: colour,
+        weight: 3,
+        opacity: 0.95,
+        lineJoin: 'round',
+        lineCap: 'round',
       }).addTo(map)
     }
 
-    // Frame the whole run rather than sitting at the entry: the interesting
-    // part of a track is usually the far end of it.
-    map.fitBounds(L.latLngBounds(track).pad(0.25), { animate: false })
-  }, [map, track])
+    // Framed around the entry point as well as the track, not just the track.
+    // The way out is the thing an operator is deciding about, and a view that
+    // scrolled the H off the top the moment the run got long would be hiding
+    // the one mark this map exists to show.
+    //
+    // The zoom is capped rather than left to fitBounds: a run a few metres old
+    // is a bounds a few metres across, which Leaflet answers by zooming past
+    // where OpenStreetMap has tiles — a blank grey square where the street
+    // should be.
+    map.fitBounds(
+      L.latLngBounds([[origin.lat, origin.lon], ...track]).pad(0.3),
+      { animate: false, maxZoom: DEFAULT_ZOOM },
+    )
+  }, [map, track, origin.lat, origin.lon])
 
-  // The live head, moved rather than rebuilt.
+  // The live head, moved rather than rebuilt. It updates ten times a second, so
+  // it must not touch the view — except to follow the robot off the edge, which
+  // is a pan rather than a refit so the scale holds still underneath it.
   useEffect(() => {
     if (!map || !nose) {
       noseRef.current?.remove()
@@ -112,8 +143,9 @@ export function GeoTraceMap({
     if (noseRef.current) {
       noseRef.current.setLatLng(nose)
     } else {
-      noseRef.current = pin(nose, '#4ade80').addTo(map)
+      noseRef.current = positionMarker(nose).addTo(map)
     }
+    if (!map.getBounds().contains(nose)) map.panTo(nose, { animate: false })
   }, [map, nose])
 
   // The map instance is torn down with the component, but the markers outlive
@@ -127,17 +159,33 @@ export function GeoTraceMap({
     }
   }, [])
 
+  const canvas = (
+    <div className={bare ? 'relative h-full w-full' : 'relative'}>
+      <div
+        ref={containerRef}
+        style={bare ? undefined : { height }}
+        className={`bg-ink-900 ${bare ? 'h-full w-full' : 'w-full'}`}
+      />
+
+      {/* z-800 because Leaflet's own panes run to 700 in this same stacking
+          context, and without it the tile layer covers the notice. */}
+      {tiles === 'unavailable' && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[800] bg-ink-1000/80 px-2 py-1 text-[11px] text-ink-400">
+          No map tiles — offline. The track is still drawn to scale.
+        </div>
+      )}
+
+      {children}
+    </div>
+  )
+
+  // Bare is the whole component on the driving screen: it fills whatever box it
+  // is given and says nothing underneath it.
+  if (bare) return canvas
+
   return (
     <figure className="m-0">
-      <div className="relative overflow-hidden rounded-panel border border-ink-800">
-        <div ref={containerRef} style={{ height }} className="w-full bg-ink-900" />
-
-        {tiles === 'unavailable' && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-ink-1000/80 px-2 py-1 text-[11px] text-ink-400">
-            No map tiles — offline. The track is still drawn to scale.
-          </div>
-        )}
-      </div>
+      <div className="overflow-hidden rounded-panel border border-ink-800">{canvas}</div>
 
       <figcaption className="mt-2 flex items-baseline justify-between gap-3">
         <span className="label">estimated track · entry point placed by hand</span>

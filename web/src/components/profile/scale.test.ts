@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
   MIN_SPAN_M,
+  axisStep,
   profileDomain,
   profileMarkers,
+  profileTicks,
   profileX,
   type ProfileMarker,
 } from '@/components/profile/scale'
@@ -111,8 +113,10 @@ describe('profileDomain', () => {
     expect(reversed.max).toBe(reached.max)
   })
 
-  it('stretches to a marker beyond the high-water mark', () => {
-    expect(profileDomain([marker(42)], 10, 20).max).toBe(42)
+  it('stretches past a marker beyond the high-water mark', () => {
+    // 42 m is ruled every 10, so the axis runs to 50 rather than stopping on a
+    // number nothing on the strip is labelled with.
+    expect(profileDomain([marker(42)], 10, 20).max).toBe(50)
   })
 
   it('always includes zero, so the run start is never off screen', () => {
@@ -120,7 +124,59 @@ describe('profileDomain', () => {
   })
 
   it('treats an absent chainage as the start, not as a reading', () => {
-    expect(profileDomain([], null, 6)).toEqual({ min: 0, max: 6 })
+    expect(profileDomain([], null, 6)).toEqual({ min: 0, max: 6, step: 1 })
+  })
+
+  it('lands both ends on a multiple of the ruling interval', () => {
+    for (const reach of [0.4, 3, 7, 23, 41, 99, 260, 1234]) {
+      const domain = profileDomain([], reach, reach)
+      expect(domain.max % domain.step).toBeCloseTo(0)
+      expect(domain.min % domain.step).toBeCloseTo(0)
+      expect(domain.max).toBeGreaterThanOrEqual(reach)
+    }
+  })
+
+  it('holds still across a whole interval, then jumps at the edge', () => {
+    // The whole point of quantising: an axis that tracked the live chainage
+    // would slide every marker leftwards continuously, and nothing an operator
+    // reached for would still be under their finger when they got there. So
+    // the end is motionless for a whole interval — here, everything from just
+    // past 20 m up to and including 25 m draws the same axis — and then steps
+    // out in one visible go.
+    const held = [20.1, 21, 23.5, 24.99, 25].map(
+      (at) => profileDomain([], at, at).max,
+    )
+    expect(new Set(held)).toEqual(new Set([25]))
+
+    expect(profileDomain([], 25.01, 25.01).max).toBe(30)
+  })
+
+  it('jumps by exactly one interval at a time, never further', () => {
+    // A jump of two intervals would be the axis rescaling under the operator
+    // rather than extending, and every marker would move twice as far.
+    let previous = profileDomain([], 0, 0)
+    for (let reach = 0; reach < 300; reach += 0.05) {
+      const domain = profileDomain([], reach, reach)
+      if (domain.max !== previous.max) {
+        expect(domain.max - previous.max).toBeLessThanOrEqual(domain.step)
+      }
+      previous = domain
+    }
+  })
+
+  it('never steps backwards as the run gets longer', () => {
+    let previous = -Infinity
+    for (let reach = 0; reach < 400; reach += 0.37) {
+      const { max } = profileDomain([], reach, reach)
+      expect(max).toBeGreaterThanOrEqual(previous)
+      previous = max
+    }
+  })
+
+  it('snaps a negative floor outwards too, never inwards', () => {
+    const domain = profileDomain([marker(-7)], -7, 40)
+    expect(domain.min).toBeLessThanOrEqual(-7)
+    expect(domain.min % domain.step).toBeCloseTo(0)
   })
 
   it('never labels the start as negative zero', () => {
@@ -129,6 +185,52 @@ describe('profileDomain', () => {
     const domain = profileDomain([], -0, 10)
     expect(Object.is(domain.min, -0)).toBe(false)
     expect(domain.min).toBe(0)
+  })
+})
+
+describe('axisStep', () => {
+  it('rules in numbers a tape measure is marked in', () => {
+    const allowed = [0.5, 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000]
+    for (let reach = 0.1; reach < 900; reach += 0.13) {
+      expect(allowed).toContain(axisStep(reach))
+    }
+  })
+
+  it('keeps the count of intervals readable at any reach', () => {
+    for (const reach of [1, 4, 17, 60, 130, 480]) {
+      const intervals = reach / axisStep(reach)
+      expect(intervals).toBeLessThanOrEqual(6)
+      expect(intervals).toBeGreaterThan(1)
+    }
+  })
+
+  it('has an interval for a run that has not moved', () => {
+    expect(axisStep(0)).toBeGreaterThan(0)
+    expect(axisStep(Number.NaN)).toBeGreaterThan(0)
+  })
+})
+
+describe('profileTicks', () => {
+  it('rules the whole axis, both ends included', () => {
+    expect(profileTicks({ min: 0, max: 30, step: 5 })).toEqual([
+      0, 5, 10, 15, 20, 25, 30,
+    ])
+  })
+
+  it('rules a negative floor as well', () => {
+    expect(profileTicks({ min: -10, max: 20, step: 10 })).toEqual([-10, 0, 10, 20])
+  })
+
+  it('does not accumulate float dust across a fractional interval', () => {
+    // Adding 0.5 repeatedly gives 1.5000000000000002 by the fourth tick, and
+    // that renders on screen.
+    expect(profileTicks({ min: 0, max: 3, step: 0.5 })).toEqual([
+      0, 0.5, 1, 1.5, 2, 2.5, 3,
+    ])
+  })
+
+  it('survives a degenerate domain instead of looping forever', () => {
+    expect(profileTicks({ min: 5, max: 5, step: 0 })).toEqual([5])
   })
 })
 

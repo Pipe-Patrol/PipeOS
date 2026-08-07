@@ -12,11 +12,13 @@ import { AlertBanner } from '@/components/overlay/AlertBanner'
 import { ProfileStrip } from '@/components/profile/ProfileStrip'
 import { DetectionBoxes } from '@/components/overlay/DetectionBoxes'
 import { DirectionArrow } from '@/components/overlay/DirectionArrow'
+import { ReturnHomeBanner } from '@/components/overlay/ReturnHomeBanner'
 import { TelemetryOverlay } from '@/components/overlay/TelemetryOverlay'
 import { ToolPalette, type PanelId } from '@/components/panel/ToolPalette'
 import { PoweredOff } from '@/components/shell/ShutdownDialog'
 import { useDriveInput } from '@/input/useDriveInput'
 import { readError } from '@/lib/errors'
+import { useReturnHome } from '@/robot/ReturnHomeProvider'
 import { useRobot } from '@/robot/RobotProvider'
 import { useLiveTrail } from '@/robot/useLiveTrail'
 import { useRun } from '@/robot/useRun'
@@ -36,6 +38,7 @@ import type { DefectRegion, Run } from '@/robot/types'
  */
 export function LiveRoute() {
   const { client, link, telemetry, disconnect } = useRobot()
+  const home = useReturnHome()
 
   const [zoom, setZoom] = useState(1)
   const [ledLevel, setLedLevel] = useState(0)
@@ -254,6 +257,9 @@ export function LiveRoute() {
             <div className="pointer-events-none absolute top-6 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-3">
               <TelemetryOverlay telemetry={telemetry} />
               <AlertBanner alert={telemetry.alert} />
+              {/* Below the fault line, not in it: a return is a decision about
+                  the run, and a broken sensor is a decision about the robot. */}
+              {runActive && <ReturnHomeBanner />}
             </div>
 
             {/* Top right, opposite the readout and clear of the palette. The
@@ -276,7 +282,11 @@ export function LiveRoute() {
               <PipeMap
                 path={trail}
                 motion={telemetry.motion}
+                // Where the operator placed the run when they created it. The
+                // robot has no GPS and could not have one down a pipe, so this
+                // is the only thing that puts the track on a street.
                 origin={run?.origin ?? null}
+                home={home}
               />
             </div>
 

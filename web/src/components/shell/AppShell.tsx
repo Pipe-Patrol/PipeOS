@@ -36,7 +36,7 @@ export function AppShell() {
       <div className="flex min-w-0 flex-1 flex-col">
         <ConnectionBanner />
         <StatusBar />
-        {telemetry && <BudgetStrip power={telemetry.power} motion={telemetry.motion} />}
+        {telemetry && <BudgetStrip />}
 
         <main className="min-h-0 flex-1 overflow-hidden">
           <Outlet />
