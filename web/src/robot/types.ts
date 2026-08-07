@@ -96,8 +96,22 @@ export interface UnavailableReading {
   amps?: number | null
 }
 
+/**
+ * State of charge. `available` is false and `percent` null until a sensor is
+ * fitted, and the console must keep saying so rather than drawing a full cell:
+ * see BudgetStrip, which prints "no sensor" instead of a number.
+ */
+export interface BatteryReading {
+  quality: Quality
+  available: boolean
+  note: string
+  percent: number | null
+  volts?: number | null
+  amps?: number | null
+}
+
 export interface Power {
-  battery: UnavailableReading
+  battery: BatteryReading
   motor_current: UnavailableReading
 }
 

@@ -840,6 +840,19 @@ class Camera:
         frame, _ = output.latest()
         return frame
 
+    def frame_sequence(self):
+        """The counter behind the live stream, or None if nothing is running.
+
+        Advances once per delivered frame, so two samples a moment apart are the
+        only honest answer to "is this camera producing pictures RIGHT NOW".
+        `available` says the device opened; this says it is still working.
+        """
+        output = self._client_output()
+        if output is None:
+            return None
+        _, sequence = output.latest()
+        return sequence
+
     def raw_output(self):
         """The unprocessed stream. For the estimators, which want it stable."""
         return self._raw

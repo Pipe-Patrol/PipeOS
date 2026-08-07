@@ -52,6 +52,28 @@
   --color-gauge-reserve: #c9911a;
   --color-gauge-spent: #5c5c5c;
 
+  /**
+   * ---- The run, drawn ----
+   *
+   * Three marks, and the same three on the map and on the longitudinal strip.
+   * They are one set of tokens rather than two so that the two views cannot
+   * drift apart: an operator glancing between them must never have to work out
+   * that the blue dot over the street and the blue dot on the strip are the
+   * same robot.
+   *
+   * Saturated on purpose. This is read on a laptop propped in a van door in
+   * daylight, over pale street tiles, and a tasteful track is an invisible one.
+   *
+   * The track and the live position are the same hue — they are the same robot,
+   * one as a history and one as a fact — and they are told apart by depth
+   * rather than by colour: the track is the darker, settled blue, the position
+   * the brighter one that also pulses. Two unrelated hues made them read as two
+   * unrelated things.
+   */
+  --color-track: #2563eb; /* where it has been */
+  --color-position: #4da3ff; /* where it is now */
+  --color-home: #ff4d4d; /* where it went in */
+
   /* ---- Severity ramp, for defect rows ---- */
   --color-sev-low: #8a8a8a;
   --color-sev-moderate: #c9c9c9;
@@ -197,6 +219,107 @@ body,
 
 @utility capture-flash {
   animation: capture-flash 220ms ease-out forwards;
+}
+
+/**
+ * ---------------------------------------------------------------------------
+ *  WHERE THE ROBOT IS, AND WHERE IT WENT IN
+ * ---------------------------------------------------------------------------
+ *
+ * Plain classes rather than Tailwind utilities, because both of these are also
+ * rendered by Leaflet from an HTML string in a divIcon — there is no JSX for
+ * Tailwind to attach anything to — and both need a pseudo-element that a single
+ * utility cannot carry.
+ *
+ * They are defined once and used twice: on the map over the street, and on the
+ * longitudinal strip under the video. The two views are the same run drawn two
+ * ways, and the marks that say "here" and "in" have to be identical between
+ * them or they read as two different things.
+ */
+
+/* The halo. Slow, and it fades out rather than bouncing — a hard beat in the
+   corner of the eye is a distraction on a screen someone drives from. */
+@keyframes position-halo {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  70%,
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+
+.position-dot {
+  position: relative;
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--color-position);
+  /* A dark ring under it: blue on a blue-grey satellite tile is nothing. */
+  box-shadow:
+    0 0 0 1.5px rgb(0 0 0 / 0.85),
+    0 0 12px rgb(59 157 255 / 0.75);
+}
+
+.position-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: var(--color-position);
+  animation: position-halo 2s ease-out infinite;
+}
+
+/**
+ * The same halo, for the one view that has to draw it in SVG.
+ *
+ * PathMap letterboxes its drawing to keep a turn from being distorted, so an
+ * HTML dot floated on top would slide off the track whenever the box it is
+ * given is not the shape of the run. `fill-box` puts the scale origin on the
+ * circle's own centre rather than the svg's.
+ */
+.position-halo {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: position-halo 2s ease-out infinite;
+}
+
+/**
+ * The entry point, as a helipad H.
+ *
+ * A letter rather than another coloured dot. It is the one mark on either view
+ * that is not an estimate — the operator placed it themselves — and it is the
+ * one an operator looks for when the question is "how do I get out", so it is
+ * worth the five pixels it takes to be unmistakable rather than merely
+ * differently coloured.
+ */
+.home-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  border: 1.5px solid var(--color-home);
+  background: rgb(8 8 8 / 0.9);
+  box-shadow: 0 0 8px rgb(0 0 0 / 0.7);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-home);
+}
+
+/**
+ * Leaflet paints its own white card behind every divIcon. Both marks above
+ * bring their own shape, so the card is just a white square around them.
+ */
+.leaflet-div-icon {
+  background: transparent;
+  border: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

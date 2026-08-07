@@ -15,6 +15,66 @@ import type { Defect, Run, Snapshot } from '@/robot/types'
 /** The narrowest axis we will draw. Below this every marker stacks at x=0. */
 export const MIN_SPAN_M = 1
 
+/**
+ * The intervals an axis is allowed to be ruled in.
+ *
+ * A round number of metres between ticks or none at all: an axis ruled every
+ * 3.7 m is an axis nobody reads a distance off. These are the numbers a tape
+ * measure is marked in, for the same reason.
+ */
+const STEPS = [0.5, 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000]
+
+/** At most this many intervals on screen. More and the labels touch. */
+const MAX_INTERVALS = 6
+
+/**
+ * The interval to rule an axis of roughly `reach` metres in.
+ *
+ * This is what makes the axis STEP rather than CREEP. An axis whose end tracked
+ * the live chainage would slide every marker leftwards, continuously, for as
+ * long as the robot was moving — so a defect an operator was reaching for would
+ * be somewhere else by the time their finger landed, and nothing on the strip
+ * would ever hold still. Quantising the end to a round number means the axis is
+ * motionless for a whole interval at a time and then jumps once, when the robot
+ * reaches the edge: a redraw the operator can see happen, rather than a drift
+ * they cannot.
+ */
+export function axisStep(reach: number): number {
+  if (!Number.isFinite(reach) || reach <= 0) return STEPS[0]
+  for (const step of STEPS) {
+    if (reach <= step * MAX_INTERVALS) return step
+  }
+  // Past the table — a run longer than any sewer this drives. Keep it round.
+  return Math.ceil(reach / MAX_INTERVALS / 1000) * 1000
+}
+
+/**
+ * The ruled marks across the axis, in metres.
+ *
+ * Every one of them is labelled, which is the point: without them the strip
+ * said only where its two ends were, and the distance to a marker in the middle
+ * of it was something an operator had to estimate by eye off a bare line.
+ */
+export function profileTicks(domain: ProfileDomain): number[] {
+  const { min, max, step } = domain
+  if (!(step > 0) || !(max > min)) return [min]
+
+  const count = Math.round((max - min) / step)
+  const ticks: number[] = []
+  for (let i = 0; i <= count; i += 1) {
+    // Accumulating `+= step` drifts into 0.30000000000000004 by the fourth
+    // tick, and that renders. Multiplying from the floor each time does not.
+    ticks.push(round(min + i * step, step))
+  }
+  return ticks
+}
+
+/** Snap to the precision the step itself carries, killing float dust. */
+function round(value: number, step: number): number {
+  const places = step < 1 ? 1 : 0
+  return Number(value.toFixed(places)) + 0
+}
+
 export type MarkerKind = 'defect' | 'snapshot'
 
 export interface ProfileMarker {
@@ -29,6 +89,8 @@ export interface ProfileMarker {
 export interface ProfileDomain {
   min: number
   max: number
+  /** The interval it is ruled in. Both ends sit on a multiple of it. */
+  step: number
 }
 
 export interface ProfileMarkers {
@@ -90,6 +152,11 @@ export function profileMarkers(run: Run | null): ProfileMarkers {
  * Zero is always included: chainage is signed from where the run started, so a
  * robot reversed out past its start point has negative chainage and the start
  * must stay on screen regardless.
+ *
+ * Both ends are then snapped outwards onto a multiple of the ruling interval,
+ * which is what makes the axis hold still — see `axisStep`. Snapping outwards
+ * is what keeps that safe: the quantised end is never inside the raw one, so
+ * the rule that the axis must not shrink under the operator survives it.
  */
 export function profileDomain(
   markers: ProfileMarker[],
@@ -103,18 +170,31 @@ export function profileDomain(
   // odometry really does report -0.0 when it is sitting still, and Math.min
   // preserves it, which put "−0.0 m" under the start of the run — a blank
   // reading dressed up as a negative measurement.
-  const min = Math.min(0, here, ...points) + 0
-  let max = Math.max(0, here, highWaterMark, ...points) + 0
+  const rawMin = Math.min(0, here, ...points) + 0
+  const rawMax = Math.max(0, here, highWaterMark, ...points) + 0
 
-  // A run seconds old has everything at 0 m. Widening forward keeps the start
-  // pinned to the left edge, which is where it stays for the rest of the run.
-  if (max - min < MIN_SPAN_M) max = min + MIN_SPAN_M
+  const step = axisStep(Math.max(rawMax - rawMin, MIN_SPAN_M))
+  const min = Math.floor(rawMin / step) * step + 0
+  let max = Math.ceil(rawMax / step) * step + 0
 
-  return { min, max }
+  // A run seconds old has everything at 0 m. Widening forward — a whole
+  // interval at a time, so both ends stay on the grid — keeps the start pinned
+  // to the left edge, which is where it stays for the rest of the run.
+  while (max - min < MIN_SPAN_M) max += step
+
+  return { min, max, step }
 }
 
-/** Where a chainage sits across the track, 0..1 from the left edge. */
-export function profileX(chainage_m: number, domain: ProfileDomain): number {
+/**
+ * Where a chainage sits across the track, 0..1 from the left edge.
+ *
+ * Takes only the two ends, so a caller with a plain span does not have to
+ * invent a ruling interval to ask the question.
+ */
+export function profileX(
+  chainage_m: number,
+  domain: Pick<ProfileDomain, 'min' | 'max'>,
+): number {
   const span = domain.max - domain.min
   if (span <= 0) return 0
   const fraction = (chainage_m - domain.min) / span

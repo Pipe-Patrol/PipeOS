@@ -22,7 +22,10 @@ export function speed(value: number | null | undefined): string {
 
 export function degrees(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return BLANK
-  return `${value.toFixed(0)}°`
+  // Rounding a small negative reading gives "-0", which reads as a fault in a
+  // list of otherwise clean numbers. Zero has no sign.
+  const rounded = Math.round(value)
+  return `${rounded === 0 ? 0 : rounded}°`
 }
 
 /**

@@ -62,6 +62,25 @@ COMMAND_TIMEOUT_S = 0.5  # no command for this long -> full stop
 MAX_CONTINUOUS_RUN_S = 0.0
 PWM_FREQUENCY_HZ = 1000
 
+# --- Self test ---
+#
+# The preflight check cannot confirm a motor without turning it. Nothing on this
+# robot measures the drivetrain: there are no encoders and no current sensor, so
+# "the GPIO was claimed" is the most a passive check can ever say, and a sheared
+# gearbox or an unplugged motor lead passes it.
+#
+# So self_test() turns them, under limits that make it the smallest movement
+# that can still be detected:
+#
+#   * the two sides run OPPOSITE ways, so the chassis pivots on the spot rather
+#     than driving off a manhole cover
+#   * MIN_DUTY, the slowest speed the gearbox actually rotates at
+#   * a third of a second, long enough for the IMU to register the yaw
+#
+# It is the only path in this file that moves a motor with no run open, which is
+# why it is here, next to the limits, and not in the API layer.
+SELF_TEST_S = 0.35
+
 # --- Physical constants, for the speed estimate ---
 MOTOR_FREE_RPM = 43.0
 WHEEL_DIAMETER_M = 0.090
@@ -247,6 +266,46 @@ class Drive:
 
             self._apply(left, right)
             return self._left, self._right
+
+    def self_test(self, seconds=SELF_TEST_S):
+        """Pivot the chassis on the spot, briefly, so the caller can see it move.
+
+        Deliberately bypasses `armed`: the whole point is to test the motors
+        BEFORE a run opens. Every other protection still applies -- the duty is
+        MIN_DUTY, the direction is opposed so there is no net travel, and the
+        lock is held for the whole pulse so no command, watchdog tick or second
+        self test can interleave with it.
+
+        Returns (ran, reason). It never raises: a preflight probe that throws
+        would leave the motors in whatever state it died in.
+        """
+        try:
+            seconds = float(seconds)
+        except (TypeError, ValueError):
+            seconds = SELF_TEST_S
+        # Bounded here rather than trusted from the caller. A self test is a
+        # fixed, known movement; a caller that could lengthen it could drive.
+        seconds = max(0.05, min(SELF_TEST_S, seconds))
+
+        with self._lock:
+            if self._closed:
+                return False, "drive is closed"
+            if not self._backend.available:
+                return False, "no motor hardware"
+
+            try:
+                self._apply(MIN_DUTY, -MIN_DUTY)
+                time.sleep(seconds)
+            finally:
+                # Every exit path stops the motors, including an exception
+                # inside the sleep. This is the one place in the file where a
+                # missed stop would leave a robot driving with no run open.
+                self._apply(0.0, 0.0)
+                self._last_command_at = time.monotonic()
+                self._last_stop_reason = "self test complete"
+
+        log.info("motor self test: pivoted for %.2fs", seconds)
+        return True, ""
 
     def stop(self, reason="stop"):
         """Immediate all-stop. Safe to call from anywhere, including a dead socket."""
