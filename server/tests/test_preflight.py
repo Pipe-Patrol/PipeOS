@@ -74,19 +74,25 @@ class FakeIMU:
 class FakeDrive:
     """Turns `yaw_gain` degrees per self test. Zero means the wheels never move."""
 
-    def __init__(self, hardware=True, imu=None, yaw_gain=12.0, ran=True):
+    def __init__(self, hardware=True, imu=None, yaw_gain=12.0, ran=True, stiction=False):
         self.hardware_available = hardware
         self.tested = 0
+        self.reversed_tests = 0
         self._imu = imu
         self._yaw_gain = yaw_gain
         self._ran = ran
+        # A gearbox that will not break away one way and will the other.
+        self._stiction = stiction
 
-    def self_test(self, seconds=None):
+    def self_test(self, seconds=None, reverse=False):
         self.tested += 1
+        if reverse:
+            self.reversed_tests += 1
         if not self._ran:
             return False, "no motor hardware"
         if self._imu is not None:
-            self._imu.yaw += self._yaw_gain
+            stuck = self._stiction and not reverse
+            self._imu.yaw += 0.0 if stuck else self._yaw_gain
         return True, ""
 
 
@@ -272,12 +278,35 @@ class TestMotors:
         # A stripped gearbox or an unplugged lead. The PWM pin is perfectly
         # healthy in both cases, which is why commanding it proves nothing.
         imu = FakeIMU()
-        robot = FakeRobot(imu=imu, drive=FakeDrive(imu=imu, yaw_gain=0.0))
-        result = preflight.motor_probe(robot)
+        drive = FakeDrive(imu=imu, yaw_gain=0.0)
+        result = preflight.motor_probe(FakeRobot(imu=imu, drive=drive))
 
         assert result["ran"] is True
         assert result["ok"] is False
         assert "did not turn" in result["reason"]
+        # Both directions were tried before calling it dead.
+        assert drive.tested == 2
+        assert drive.reversed_tests == 1
+
+    def test_passes_a_gearbox_that_only_breaks_away_the_second_way(self):
+        # Stiction, not a broken drive. Without the reversal this reads as a
+        # failed motor and grounds a robot that is fine.
+        imu = FakeIMU()
+        drive = FakeDrive(imu=imu, yaw_gain=14.0, stiction=True)
+        result = preflight.motor_probe(FakeRobot(imu=imu, drive=drive))
+
+        assert result["ok"] is True
+        assert result["confirmed"] is True
+        assert result["evidence"]["reversed_to_start"] is True
+        assert drive.reversed_tests == 1
+
+    def test_does_not_reverse_a_drive_that_turned_first_time(self):
+        imu = FakeIMU()
+        drive = FakeDrive(imu=imu, yaw_gain=14.0)
+        preflight.motor_probe(FakeRobot(imu=imu, drive=drive))
+
+        assert drive.tested == 1
+        assert drive.reversed_tests == 0
 
     def test_passes_unconfirmed_with_no_imu_to_check_against(self):
         imu = FakeIMU(yaw=None)

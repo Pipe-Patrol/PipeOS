@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, type CSSProperties } from 'react'
 
 import { DefectPanel } from '@/components/panel/DefectPanel'
 import { GalleryPanel } from '@/components/panel/GalleryPanel'
@@ -8,7 +8,6 @@ import { ToolButton } from '@/components/panel/ToolButton'
 import {
   DefectIcon,
   GalleryIcon,
-  KeyboardIcon,
   LightIcon,
   RecordIcon,
   SnapshotIcon,
@@ -30,7 +29,6 @@ interface ToolPaletteProps {
   onSnapshot: () => void
   onToggleRecording: () => void
   onRunChanged: () => void
-  onShowShortcuts: () => void
   /**
    * True while the operator is drawing a defect box on the feed. Suppresses the
    * letter shortcuts (`d` would close the panel out from under them) and keeps
@@ -62,7 +60,6 @@ export function ToolPalette({
   onSnapshot,
   onToggleRecording,
   onRunChanged,
-  onShowShortcuts,
   drawingRegion,
   defectRegion,
   defectRegionMarkedAt,
@@ -107,23 +104,25 @@ export function ToolPalette({
 
   return (
     <>
-      <div className="panel flex flex-col gap-[3px] p-1">
+      <div data-panel-rail className="panel flex flex-col gap-[3px] p-1">
         <ToolButton
           label="Lights"
           hint="L"
           active={ledLevel > 0}
           onClick={() => toggle('lights')}
         >
-          <LightIcon className="size-[19px]" />
+          <span className="lamp-glow" style={{ '--glow': ledLevel } as CSSProperties}>
+            <LightIcon size={20} weight={0.97} />
+          </span>
         </ToolButton>
         <ToolButton label="Image" onClick={() => toggle('tuning')}>
-          <TuneIcon className="size-[19px]" />
+          <TuneIcon size={20} weight={0.9} />
         </ToolButton>
 
         <span className="my-0.5 h-px w-7 self-center bg-ink-800" />
 
         <ToolButton label="Snapshot" hint="C" onClick={onSnapshot} disabled={!run}>
-          <SnapshotIcon className="size-[19px]" />
+          <SnapshotIcon size={20} weight={0.9} />
         </ToolButton>
         <ToolButton
           label={recording ? 'Stop recording' : 'Record'}
@@ -133,19 +132,13 @@ export function ToolPalette({
           disabled={!run}
           tone={recording ? 'fault' : 'default'}
         >
-          <RecordIcon className="size-[19px]" />
+          <RecordIcon size={20} weight={0.9} />
         </ToolButton>
         <ToolButton label="Defect" hint="D" onClick={() => toggle('defects')}>
-          <DefectIcon className="size-[19px]" />
+          <DefectIcon size={20} weight={0.9} />
         </ToolButton>
         <ToolButton label="Camera roll" hint="G" onClick={() => toggle('gallery')}>
-          <GalleryIcon className="size-[19px]" />
-        </ToolButton>
-
-        <span className="my-0.5 h-px w-7 self-center bg-ink-800" />
-
-        <ToolButton label="Shortcuts" hint="?" onClick={onShowShortcuts}>
-          <KeyboardIcon className="size-[19px]" />
+          <GalleryIcon size={20} weight={0.9} />
         </ToolButton>
       </div>
 

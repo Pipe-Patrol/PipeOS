@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 
+import { CloseIcon } from '@/components/primitives/icons'
+
 interface PopoverProps {
   title: string
   onClose: () => void
@@ -35,7 +37,13 @@ export function Popover({
       if (event.key === 'Escape') onClose()
     }
     const onPointerDown = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) onClose()
+      const target = event.target as Node
+      if (ref.current?.contains(target)) return
+      // The rail is chrome, not "away". It runs its own toggle on click, and
+      // closing here first would make a second press on the open tool read as a
+      // fresh open — the panel would never shut.
+      if (target instanceof Element && target.closest('[data-panel-rail]')) return
+      onClose()
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('pointerdown', onPointerDown, true)
@@ -58,16 +66,7 @@ export function Popover({
           className="rounded-sm p-1 text-ink-500 hover:bg-white/10 hover:text-ink-100"
           aria-label="Close"
         >
-          <svg
-            viewBox="0 0 24 24"
-            width={14}
-            height={14}
-            stroke="currentColor"
-            fill="none"
-            strokeWidth={2}
-          >
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
+          <CloseIcon size={14} />
         </button>
       </header>
       <div className="overflow-y-auto p-3">{children}</div>

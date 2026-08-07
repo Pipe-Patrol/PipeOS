@@ -267,8 +267,15 @@ class Drive:
             self._apply(left, right)
             return self._left, self._right
 
-    def self_test(self, seconds=SELF_TEST_S):
+    def self_test(self, seconds=SELF_TEST_S, reverse=False):
         """Pivot the chassis on the spot, briefly, so the caller can see it move.
+
+        Both motors run together, opposed. They are never tested one at a time:
+        a single motor has to drag the chassis and the other, unpowered gearbox
+        with it, and at MIN_DUTY that is the case most likely to stall -- so
+        testing them separately would manufacture the failure it went looking
+        for. `reverse` swaps which way the pivot goes; see motor_probe, which
+        uses it to tell a gearbox that is stuck from one that is broken.
 
         Deliberately bypasses `armed`: the whole point is to test the motors
         BEFORE a run opens. Every other protection still applies -- the duty is
@@ -294,7 +301,8 @@ class Drive:
                 return False, "no motor hardware"
 
             try:
-                self._apply(MIN_DUTY, -MIN_DUTY)
+                duty = -MIN_DUTY if reverse else MIN_DUTY
+                self._apply(duty, -duty)
                 time.sleep(seconds)
             finally:
                 # Every exit path stops the motors, including an exception
@@ -304,7 +312,11 @@ class Drive:
                 self._last_command_at = time.monotonic()
                 self._last_stop_reason = "self test complete"
 
-        log.info("motor self test: pivoted for %.2fs", seconds)
+        log.info(
+            "motor self test: pivoted %s for %.2fs",
+            "counter-clockwise" if reverse else "clockwise",
+            seconds,
+        )
         return True, ""
 
     def stop(self, reason="stop"):

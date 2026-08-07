@@ -1,4 +1,5 @@
 import { SettingRow } from '@/components/live/runsetup/SettingRow'
+import { sliderFill } from '@/components/primitives/Slider'
 import { DEFECT_GROUPS, DEFECT_TYPES } from '@/constants/defects'
 
 /**
@@ -43,14 +44,12 @@ const MODES: { value: RunMode; label: string; detail: string }[] = [
   {
     value: 'manual',
     label: 'Manual',
-    detail:
-      'The operator will move the robot and flag defects manually. The model still draws boxes on the feed, but nothing is recorded unless you record it.',
+    detail: 'The operator will move the robot and flag defects manually.',
   },
   {
     value: 'assisted',
     label: 'Assisted',
-    detail:
-      'The robot will move and return home on its own, and anything it detects above the confidence threshold is flagged automatically as it goes.',
+    detail: 'The robot will move, return, and flag defects on its own.',
   },
 ]
 
@@ -155,7 +154,8 @@ export function DetectionSettings({ value, onChange }: DetectionSettingsProps) {
               value={value.minConfidence}
               onChange={(event) => set('minConfidence', Number(event.target.value))}
               aria-label="Minimum confidence"
-              className="h-1 w-28 accent-white"
+              style={sliderFill(value.minConfidence, 0.1, 0.9)}
+              className="slider w-28"
             />
             <span className="w-8 text-right text-[12px] tnum text-ink-200">
               {Math.round(value.minConfidence * 100)}%

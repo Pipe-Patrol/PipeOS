@@ -59,7 +59,7 @@ export function SettingsRoute() {
             Object.entries(health.capabilities).map(([name, present]) => (
               <li key={name} className="flex items-center gap-2 text-[13px]">
                 <span
-                  className={`h-2 w-2 rounded-full ${present ? 'bg-state-recording-signal' : 'bg-text-faint'}`}
+                  className={`h-2 w-2 rounded-full ${present ? 'bg-state-recording-signal' : 'bg-ink-600'}`}
                 />
                 <span className={present ? 'text-ink-100' : 'text-ink-500'}>
                   {name.replace(/_/g, ' ')}
