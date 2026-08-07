@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import L from 'leaflet'
 
 import { project, projectPath, type Origin } from '@/components/map/geo'
@@ -20,6 +20,8 @@ interface GeoTraceMapProps {
   head?: { x: number; y: number } | null
   height?: number
   interactive?: boolean
+  /** See useLeaflet: the driving screen drags and zooms but keeps its keys. */
+  keyboard?: boolean
   /**
    * Fill the box: no border, no rounding, no caption. This is how it is drawn
    * on the driving screen, where the map IS the panel rather than a picture
@@ -53,13 +55,22 @@ export function GeoTraceMap({
   head = null,
   height = 260,
   interactive = true,
+  keyboard = interactive,
   bare = false,
   children,
 }: GeoTraceMapProps) {
   const { containerRef, map, tiles } = useLeaflet({
     centre: [origin.lat, origin.lon],
     interactive,
+    keyboard,
   })
+
+  // True once the operator has moved the view themselves. From that moment the
+  // map stops reframing itself: a view that snapped back to the whole run every
+  // time the robot logged a path point would be a view nobody could hold still
+  // long enough to read a street name off. It is a state they can get out of —
+  // see the recentre control — rather than one they are stuck in.
+  const [manual, setManual] = useState(false)
 
   // As [lat, lon] tuples: Leaflet's own LatLngLiteral spells it `lng`, and
   // converting once here beats spelling it both ways everywhere below.
@@ -82,6 +93,23 @@ export function GeoTraceMap({
   const lineRef = useRef<L.Polyline | null>(null)
   const noseRef = useRef<L.Marker | null>(null)
 
+  // What counts as "the operator moved it" is read off the DOM rather than off
+  // Leaflet's own move events, because Leaflet fires those for our own
+  // fitBounds too — the map would declare itself manually driven the first time
+  // it framed the track, before anyone had touched it.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || !interactive) return
+
+    const touched = () => setManual(true)
+    container.addEventListener('pointerdown', touched)
+    container.addEventListener('wheel', touched, { passive: true })
+    return () => {
+      container.removeEventListener('pointerdown', touched)
+      container.removeEventListener('wheel', touched)
+    }
+  }, [containerRef, interactive])
+
   // Where the operator said the robot went in. Drawn once, and drawn even
   // before there is any track: it is the one point on here that is not an
   // estimate, and the one an operator looks for to answer "how do I get out".
@@ -103,7 +131,7 @@ export function GeoTraceMap({
       return
     }
 
-    const colour = mapColour('--color-track', '#39ff88')
+    const colour = mapColour('--color-track', '#2563eb')
     if (lineRef.current) {
       lineRef.current.setLatLngs(track)
     } else {
@@ -125,11 +153,12 @@ export function GeoTraceMap({
     // is a bounds a few metres across, which Leaflet answers by zooming past
     // where OpenStreetMap has tiles — a blank grey square where the street
     // should be.
+    if (manual) return
     map.fitBounds(
       L.latLngBounds([[origin.lat, origin.lon], ...track]).pad(0.3),
       { animate: false, maxZoom: DEFAULT_ZOOM },
     )
-  }, [map, track, origin.lat, origin.lon])
+  }, [map, track, origin.lat, origin.lon, manual])
 
   // The live head, moved rather than rebuilt. It updates ten times a second, so
   // it must not touch the view — except to follow the robot off the edge, which
@@ -145,8 +174,13 @@ export function GeoTraceMap({
     } else {
       noseRef.current = positionMarker(nose).addTo(map)
     }
-    if (!map.getBounds().contains(nose)) map.panTo(nose, { animate: false })
-  }, [map, nose])
+    // Following the robot off the edge is part of framing the run, so it stops
+    // when the operator takes the view over — otherwise a map dragged one
+    // street across would be yanked back the moment the robot moved.
+    if (!manual && !map.getBounds().contains(nose)) {
+      map.panTo(nose, { animate: false })
+    }
+  }, [map, nose, manual])
 
   // The map instance is torn down with the component, but the markers outlive
   // a `head` going null, so they need releasing by hand.
@@ -166,6 +200,19 @@ export function GeoTraceMap({
         style={bare ? undefined : { height }}
         className={`bg-ink-900 ${bare ? 'h-full w-full' : 'w-full'}`}
       />
+
+      {/* Only once there is something to undo. A permanent recentre button
+          would be a control that does nothing for the whole of most runs. */}
+      {manual && (
+        <button
+          type="button"
+          onClick={() => setManual(false)}
+          className="panel absolute top-2 right-2 z-[800] flex h-7 items-center rounded-panel px-2 text-[11px] text-ink-200 transition-colors hover:bg-white/10"
+          title="Frame the whole run again, and follow the robot"
+        >
+          Recentre
+        </button>
+      )}
 
       {/* z-800 because Leaflet's own panes run to 700 in this same stacking
           context, and without it the tile layer covers the notice. */}

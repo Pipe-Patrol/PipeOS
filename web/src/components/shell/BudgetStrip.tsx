@@ -33,7 +33,7 @@ export function BudgetStrip() {
 
   return (
     <div
-      className={`flex h-[20px] shrink-0 items-center gap-3 border-b px-3 transition-colors ${SURFACE[budget.state]}`}
+      className={`flex h-[18px] shrink-0 items-center gap-3 border-b px-3 transition-colors ${SURFACE[budget.state]}`}
     >
       <Bands budget={budget} />
 
@@ -101,7 +101,7 @@ function Bands({ budget }: { budget: RthBudget }) {
 
   return (
     <div
-      className="flex h-[9px] min-w-0 flex-1 overflow-hidden rounded-full bg-ink-900"
+      className="flex h-[8px] min-w-0 flex-1 overflow-hidden rounded-full bg-ink-900"
       role="img"
       aria-label={`${format.percent(budget.charge_pct)} charge, ${format.percent(
         budget.reserve_pct,

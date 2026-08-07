@@ -31,11 +31,24 @@ export const MAX_ZOOM = 19
 interface Options {
   centre: [number, number]
   zoom?: number
-  /** False for a display-only map: no dragging, no zooming, no keyboard. */
+  /** False for a display-only map: no dragging, no zooming. */
   interactive?: boolean
+  /**
+   * Arrow keys and +/- pan and zoom the map when it has focus. Separate from
+   * `interactive` because of exactly one caller: the map on the driving screen,
+   * which an operator must be able to drag and zoom while the arrow keys still
+   * belong to the robot. A map that quietly ate a drive command because a click
+   * left it focused would be the worst kind of bug this console could have.
+   */
+  keyboard?: boolean
 }
 
-export function useLeaflet({ centre, zoom = DEFAULT_ZOOM, interactive = true }: Options) {
+export function useLeaflet({
+  centre,
+  zoom = DEFAULT_ZOOM,
+  interactive = true,
+  keyboard = interactive,
+}: Options) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const [map, setMap] = useState<L.Map | null>(null)
@@ -58,7 +71,7 @@ export function useLeaflet({ centre, zoom = DEFAULT_ZOOM, interactive = true }: 
       scrollWheelZoom: interactive,
       doubleClickZoom: interactive,
       boxZoom: interactive,
-      keyboard: interactive,
+      keyboard,
       touchZoom: interactive,
     })
 
@@ -88,7 +101,7 @@ export function useLeaflet({ centre, zoom = DEFAULT_ZOOM, interactive = true }: 
       mapRef.current = null
       setMap(null)
     }
-  }, [interactive])
+  }, [interactive, keyboard])
 
   return { containerRef, map, tiles }
 }

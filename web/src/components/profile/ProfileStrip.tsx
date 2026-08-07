@@ -43,10 +43,12 @@ interface ProfileStripProps {
  * written in.
  *
  * Markers are drawn as markers — a body with a point on it, aimed at the
- * chainage they were filed at. Red and larger for a defect, grey and smaller
- * for a snapshot: hue alone would put every colour-blind operator, and anyone
- * reading this in a van in daylight, on the wrong side of a distinction that
- * matters.
+ * chainage they were filed at. One size for both kinds, so a strip of them
+ * reads as one ruled row rather than as two. Red for a defect and grey for a
+ * snapshot is then the whole distinction, which is safe here only because those
+ * two differ in lightness as much as in hue: red against grey survives every
+ * common colour deficiency, and every marker also names its kind to a screen
+ * reader.
  */
 
 /**
@@ -58,14 +60,25 @@ interface ProfileStripProps {
  * ruling nobody can read a distance off.
  */
 const LAYOUT = {
-  height: 62,
+  height: 52,
   /** The measuring bracket, when two markers are being compared. */
-  bracketY: 7,
+  bracketY: 5,
   /** Where a marker's point lands — the axis. */
-  axisY: 30,
+  axisY: 26,
   /** How far the ruled ticks drop below it. */
-  tickDrop: 5,
+  tickDrop: 4,
 } as const
+
+/** The live position's id in a selection. Not a marker, so it cannot collide. */
+const HERE = '__here__'
+
+/** One end of a measurement: a logged marker, or the robot itself. */
+interface SelectablePoint {
+  id: string
+  chainage_m: number
+  /** Null for the live position, which has no record behind it to show. */
+  marker: ProfileMarker | null
+}
 
 export function ProfileStrip({ client, run, chainage_m }: ProfileStripProps) {
   // Up to two. One shows its card; two show the distance between them, which is
@@ -75,31 +88,43 @@ export function ProfileStrip({ client, run, chainage_m }: ProfileStripProps) {
   const [selected, setSelected] = useState<string[]>([])
   const rootRef = useRef<HTMLDivElement>(null)
 
-  // The furthest the robot has been this run, both ways. Held here because
-  // nothing on the wire reports it, and because an axis that shrank when the
-  // robot reversed would slide every marker out from under the operator's
-  // finger. It is also what says which of the axis is surveyed and which is
-  // still ahead, now that the axis runs on past the robot to a round number.
+  // The furthest the robot has been this run. Held here because nothing on the
+  // wire reports it, and because an axis that shrank when the robot reversed
+  // would slide every marker out from under the operator's finger.
   const runId = run?.id ?? null
-  const [reach, setReach] = useState({ runId, lo: chainage_m, hi: chainage_m })
+  const [reach, setReach] = useState({ runId, max: chainage_m })
   if (reach.runId !== runId) {
-    setReach({ runId, lo: chainage_m, hi: chainage_m })
-  } else if (chainage_m > reach.hi) {
-    setReach({ ...reach, hi: chainage_m })
-  } else if (chainage_m < reach.lo) {
-    setReach({ ...reach, lo: chainage_m })
+    setReach({ runId, max: chainage_m })
+  } else if (chainage_m > reach.max) {
+    setReach({ runId, max: chainage_m })
   }
 
   const { markers, unplaced } = profileMarkers(run)
-  const domain = profileDomain(markers, chainage_m, reach.hi)
+  const domain = profileDomain(markers, chainage_m, reach.max)
   const ticks = useMemo(() => profileTicks(domain), [domain])
+
+  // Everything on the strip that can be one end of a measurement. The robot
+  // itself is one of them: "how far is that defect from where I am now" is the
+  // question an operator asks on the way back out, and answering it off two
+  // markers only would have meant driving to one of them to find out.
+  const points = useMemo<SelectablePoint[]>(
+    () => [
+      ...markers.map((marker) => ({
+        id: marker.id,
+        chainage_m: marker.chainage_m,
+        marker,
+      })),
+      { id: HERE, chainage_m, marker: null },
+    ],
+    [markers, chainage_m],
+  )
 
   const chosen = useMemo(
     () =>
       selected
-        .map((id) => markers.find((marker) => marker.id === id))
-        .filter((marker): marker is ProfileMarker => marker != null),
-    [selected, markers],
+        .map((id) => points.find((point) => point.id === id))
+        .filter((point): point is SelectablePoint => point != null),
+    [selected, points],
   )
 
   const toggle = (id: string) => {
@@ -144,28 +169,16 @@ export function ProfileStrip({ client, run, chainage_m }: ProfileStripProps) {
       style={{ height: LAYOUT.height }}
     >
       <div className="relative h-full w-full">
-        {/* The axis: what is still ahead, in the dark tone... */}
+        {/* One tone, edge to edge. The surveyed stretch was drawn over this in
+            the track colour for a while, and it was the wrong idea: on the map
+            that line is a shape you read a route off, and flattened onto an
+            axis it is a bar that only ever says "left of the robot" — a fact
+            the robot's own mark already tells you, in a colour loud enough to
+            compete with the markers that carry the actual findings. */}
         <span
           aria-hidden
           className="absolute inset-x-0 h-px bg-ink-700"
           style={{ top: LAYOUT.axisY }}
-        />
-
-        {/* ...and what has already been surveyed, in the same colour the map
-            draws the track in. The two are the same fact, so they are the same
-            token — including the glow, which was once a hardcoded green and is
-            exactly how the two views would have drifted apart. */}
-        <span
-          aria-hidden
-          className="absolute h-[3px] rounded-full"
-          style={{
-            top: LAYOUT.axisY - 1,
-            left: percent(Math.min(0, reach.lo)),
-            right: `${100 - profileX(reach.hi, domain) * 100}%`,
-            background: 'var(--color-track)',
-            boxShadow:
-              '0 0 7px color-mix(in srgb, var(--color-track) 55%, transparent)',
-          }}
         />
 
         {/* The tick at zero is left unlabelled: the H badge stands on it, and
@@ -203,23 +216,35 @@ export function ProfileStrip({ client, run, chainage_m }: ProfileStripProps) {
           />
         ))}
 
-        {/* Where the robot is now. Same mark as on the map, and above
-            everything else on the strip because it is the only one that moves. */}
-        <span
-          aria-hidden
-          className="absolute z-30 -translate-x-1/2 -translate-y-1/2"
-          style={{ left: percent(chainage_m), top: LAYOUT.axisY }}
+        {/* Where the robot is now. Same mark as on the map, above everything
+            else on the strip because it is the only one that moves — and
+            pressable, because it is one end of most measurements worth taking. */}
+        <button
+          type="button"
+          onClick={() => toggle(HERE)}
+          className="absolute z-30 flex w-6 -translate-x-1/2 items-center justify-center"
+          style={{
+            left: percent(chainage_m),
+            top: LAYOUT.axisY - 10,
+            height: 20,
+          }}
+          aria-label={`Current position, ${format.metres(chainage_m)}`}
+          aria-pressed={selected.includes(HERE)}
         >
-          <span className="position-dot" />
-        </span>
+          <span
+            className={`position-dot ${
+              selected.includes(HERE) ? 'ring-2 ring-ink-100' : ''
+            }`}
+          />
+        </button>
 
         {chosen.length === 2 && (
           <Measurement a={chosen[0]} b={chosen[1]} domain={domain} />
         )}
 
-        {chosen.length === 1 && run && (
+        {chosen.length === 1 && chosen[0].marker && run && (
           <MarkerPopover
-            marker={chosen[0]}
+            marker={chosen[0].marker}
             fraction={profileX(chosen[0].chainage_m, domain)}
             run={run}
             client={client}
@@ -289,6 +314,10 @@ function Tick({
  * entry point and the ruling, one more dot was one more round mark to tell
  * apart. A shape with a point resolves both: it reads as a pin, and the tip
  * says exactly which metre without the shape above it having to be that narrow.
+ *
+ * Defects and snapshots are the same size. They were not, and the smaller grey
+ * one read as a lesser version of the red rather than as a different kind of
+ * thing — a photograph is not a mild defect.
  */
 function MarkerPin({
   marker,
@@ -302,8 +331,8 @@ function MarkerPin({
   onClick: () => void
 }) {
   const isDefect = marker.kind === 'defect'
-  const width = isDefect ? 13 : 10
-  const height = isDefect ? 17 : 13
+  const width = 12
+  const height = 16
 
   return (
     <button
@@ -352,8 +381,8 @@ function Measurement({
   b,
   domain,
 }: {
-  a: ProfileMarker
-  b: ProfileMarker
+  a: SelectablePoint
+  b: SelectablePoint
   domain: ProfileDomain
 }) {
   const from = Math.min(a.chainage_m, b.chainage_m)

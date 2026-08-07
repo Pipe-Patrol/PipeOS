@@ -26,11 +26,15 @@ interface PipeMapProps {
  * inside it, no caption below it, nothing between the operator and the street.
  *
  * Over map tiles once the run has an entry point, in the bare local frame
- * otherwise. The map itself is non-interactive either way — this sits on top of
- * the driving screen, and a map that swallows a scroll or drags out from under
- * a stray click is a map that has taken attention away from the pipe. The one
- * control on it is the return, which is the one thing worth taking attention
- * for.
+ * otherwise.
+ *
+ * IT DRAGS AND ZOOMS, BUT IT NEVER TAKES A KEY. Being able to pull the view up
+ * the street to see which cover the robot is heading for is most of what a map
+ * on a driving screen is for. Arrow keys are the exception and they stay with
+ * the robot: Leaflet would otherwise pan the map with them whenever a click had
+ * left it focused, and a drive command that silently moved a map instead of the
+ * robot is the worst bug this console could have. Once the operator moves the
+ * view it stops reframing itself, and a Recentre button appears to give it back.
  */
 export function PipeMap({ path, motion, origin = null, home }: PipeMapProps) {
   const control = <ReturnControl home={home} />
@@ -42,7 +46,8 @@ export function PipeMap({ path, motion, origin = null, home }: PipeMapProps) {
           origin={origin}
           path={path}
           head={motion.position}
-          interactive={false}
+          interactive
+          keyboard={false}
           bare
         >
           {control}
@@ -57,44 +62,53 @@ export function PipeMap({ path, motion, origin = null, home }: PipeMapProps) {
 }
 
 /**
- * Return to home.
+ * Return to home: the H, and nothing else.
  *
- * It carries its own arithmetic rather than sitting next to it: how far back it
- * is and how long that should take are the two facts that decide whether to
- * press it, and a button that made the operator read them off somewhere else
- * would be a button pressed on a guess.
+ * It carried the distance and the time back on its face for a while, and that
+ * was one readout too many on a 268 px map — the budget bar across the top of
+ * the console already states both, continuously, and a second copy on the glass
+ * was two places to read the same number and one place for them to disagree.
+ * The numbers are still here, in the tooltip and in the accessible name, for
+ * anyone who wants them without looking up.
+ *
+ * Bottom left, tucked into the corner: hard away from the Leaflet attribution
+ * on the other side, and out of the middle of a map whose whole job is to show
+ * street.
  *
  * Nothing here steers. There is no autonomy on this robot, so engaging a return
- * puts the console into a mode — the banner, the budget strip and this button
- * all say so — and the operator drives it out. The word is "Returning", not
- * "Returned", for that reason.
+ * puts the console into a mode — the banner and the budget strip both say so —
+ * and the operator drives it out.
  */
 function ReturnControl({ home }: { home: ReturnHomeValue }) {
   const { budget, mode, engage, cancel } = home
   const returning = mode !== null
+  const reading = `${format.metres(budget.distance_m, 0)} · ${format.duration(
+    budget.seconds,
+  )}`
 
   return (
-    <div className="absolute right-2 bottom-2 z-[800]">
+    <div className="absolute bottom-2 left-2 z-[800]">
       <button
         type="button"
         onClick={() => (returning ? cancel() : engage('manual'))}
-        className={`panel flex h-8 items-center gap-2 rounded-panel px-2.5 text-[11.5px] transition-colors ${
+        className={`panel flex size-9 items-center justify-center rounded-panel transition-colors ${
           returning
-            ? 'border-[color:var(--color-position)]/70 bg-[color:var(--color-position)]/25 text-ink-100'
-            : 'text-ink-200 hover:bg-white/10'
+            ? 'border-[color:var(--color-position)]/70 bg-[color:var(--color-position)]/25'
+            : 'hover:bg-white/10'
         }`}
         aria-pressed={returning}
+        aria-label={
+          returning
+            ? `Returning home, ${reading}. Stand the return down`
+            : `Return home, ${reading}`
+        }
         title={
           returning
-            ? 'Stand the return down and carry on surveying'
-            : 'Head back to the entry point'
+            ? `Returning — ${reading}. Click to stand it down`
+            : `Return to the entry point — ${reading}`
         }
       >
-        <span className="home-badge !h-4 !w-4 !text-[9px]">H</span>
-        <span className="tnum">
-          {returning ? 'Returning · ' : ''}
-          {format.metres(budget.distance_m, 0)} · {format.duration(budget.seconds)}
-        </span>
+        <span className="home-badge">H</span>
       </button>
     </div>
   )
