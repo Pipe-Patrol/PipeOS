@@ -80,7 +80,10 @@ export function ConnectRoute() {
       <form onSubmit={submit} className="panel flex flex-col gap-4 rounded-lg p-4">
         <div className="flex items-center gap-3">
           <RobotIcon
-            className={`size-[22px] ${status === 'ok' ? 'text-state-recording-signal' : 'text-ink-500'}`}
+            size={22}
+            className={
+              status === 'ok' ? 'text-state-recording-signal' : 'text-ink-500'
+            }
           />
           <StatusLine status={status} health={health} address={address} />
         </div>

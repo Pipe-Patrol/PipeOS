@@ -48,7 +48,7 @@ export function ShutdownDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-1000/75 p-4 backdrop-blur-sm">
       <div className="panel w-[min(480px,92vw)] rounded-lg p-5">
         <div className="flex items-center gap-2 text-state-fault-signal">
-          <ShieldIcon className="size-5" />
+          <ShieldIcon size={20} />
           <h2 className="display text-[15px] text-ink-100">Shut down the robot</h2>
         </div>
 

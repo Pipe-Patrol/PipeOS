@@ -1,8 +1,15 @@
+import { opticalStrokePx } from '@/components/primitives/iconStroke'
+
 interface BatteryIconProps {
   /** null when no voltage sensor is fitted, which is the case today. */
   percent: number | null
+  /** Rendered height in px. Sets the stroke, as everywhere else in the set. */
+  height?: number
   className?: string
 }
+
+/** The glyph is wider than it is tall, so height is what the eye measures. */
+const VIEWBOX_H = 12
 
 /**
  * A battery, or an honest statement that there is no battery reading.
@@ -12,7 +19,12 @@ interface BatteryIconProps {
  * is drawn struck through rather than left blank because an empty space reads
  * as a rendering fault, where this reads as "there is nothing to show".
  */
-export function BatteryIcon({ percent, className }: BatteryIconProps) {
+export function BatteryIcon({
+  percent,
+  height = VIEWBOX_H,
+  className,
+}: BatteryIconProps) {
+  const stroke = (opticalStrokePx(height) * VIEWBOX_H) / height
   const unknown = percent == null
   const clamped = unknown ? 0 : Math.max(0, Math.min(100, percent))
   // 17.5 is the inner width of the body in viewBox units.
@@ -40,6 +52,7 @@ export function BatteryIcon({ percent, className }: BatteryIconProps) {
         rx="2"
         fill="none"
         stroke="currentColor"
+        strokeWidth={stroke}
       />
       <rect x="22.5" y="3.5" width="3" height="5" rx="1" fill="currentColor" />
       {!unknown && (
@@ -52,7 +65,8 @@ export function BatteryIcon({ percent, className }: BatteryIconProps) {
           x2="18.5"
           y2="2.5"
           stroke="currentColor"
-          strokeWidth={1.5}
+          strokeWidth={stroke}
+          strokeLinecap="round"
         />
       )}
     </svg>
