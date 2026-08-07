@@ -278,13 +278,22 @@ def motor_probe(robot):
 
     THIS MOVES THE ROBOT. It pivots on the spot for a third of a second at the
     lowest duty the gearbox turns at -- see Drive.self_test, which owns the
-    limits -- and it only ever runs when an operator asks for it.
+    limits -- and both motors always run together.
 
     The IMU closes the loop. Commanding a motor proves the software works;
     watching the chassis rotate proves the motor, the driver, the wiring and the
     gearbox all do. With no IMU fitted the pulse still runs and the result comes
     back unconfirmed, because a claim that cannot be checked should not wear a
     tick.
+
+    A pulse that does not move the robot is tried once more the other way before
+    it is called a failure. MIN_DUTY is by definition the edge of what the
+    gearbox will turn at, so a cold robot, a wheel against a kerb or a tooth
+    resting badly can all refuse to break away in one direction and go without
+    complaint in the other. There is no current sensing on this chassis, so a
+    stall and a stripped gearbox look identical from here -- the reversal is the
+    only thing that separates them, and without it stiction is reported to the
+    operator as a broken drive.
     """
     if robot.active_run_id:
         return _result(False, False, "a run is already open")
@@ -309,15 +318,41 @@ def motor_probe(robot):
         )
 
     turned = abs(_wrap_degrees(after - before))
-    if turned < MOTOR_MIN_YAW_DEG:
+    if turned >= MOTOR_MIN_YAW_DEG:
+        return _result(True, True, confirmed=True, yaw_change_deg=round(turned, 1))
+
+    ran, reason = robot.drive.self_test(reverse=True)
+    if not ran:
+        return _result(True, False, reason)
+
+    time.sleep(0.3)
+    settled = robot.imu.status().get("yaw")
+    if settled is None:
         return _result(
             True,
-            False,
-            f"the motors were driven but the robot did not turn ({turned:.1f}°)",
-            yaw_change_deg=round(turned, 1),
+            True,
+            "the motors were driven, but there is no IMU to confirm they turned",
+            confirmed=False,
         )
 
-    return _result(True, True, confirmed=True, yaw_change_deg=round(turned, 1))
+    back = abs(_wrap_degrees(settled - after))
+    if back >= MOTOR_MIN_YAW_DEG:
+        return _result(
+            True,
+            True,
+            "the motors needed a nudge the other way before they broke away",
+            confirmed=True,
+            yaw_change_deg=round(back, 1),
+            reversed_to_start=True,
+        )
+
+    return _result(
+        True,
+        False,
+        "the motors were driven both ways but the robot did not turn "
+        f"({turned:.1f}° then {back:.1f}°)",
+        yaw_change_deg=round(max(turned, back), 1),
+    )
 
 
 def _wrap_degrees(value):

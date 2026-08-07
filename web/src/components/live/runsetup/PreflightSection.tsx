@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { CheckRow } from '@/components/live/runsetup/CheckRow'
 import { blockers, type Check } from '@/components/live/runsetup/checks'
-import { confirmedCount, type ProbeReport } from '@/components/live/runsetup/probes'
+import {
+  confirmedCount,
+  type ProbeReport,
+  type ProbeResult,
+} from '@/components/live/runsetup/probes'
 import { Button } from '@/components/primitives/Button'
 import { readError } from '@/lib/errors'
 import type { RobotClient } from '@/robot/client'
@@ -12,6 +16,12 @@ interface PreflightSectionProps {
   checks: Check[]
   /** Runs the probes. The panel owns the result so the checks can fold it in. */
   onProbeReport: (report: ProbeReport | null) => void
+  /**
+   * False until a sweep has run to completion. The panel holds the start button
+   * closed on it, so a run cannot begin on reported flags while the probes that
+   * would contradict them are still in flight.
+   */
+  onSettledChange: (settled: boolean) => void
   /** True while the run is open, which is when the motor test is refused. */
   runActive: boolean
 }
@@ -27,46 +37,68 @@ interface PreflightSectionProps {
  * dies while the operator is still reading goes amber under them. And POST
  * /api/preflight runs the probes that actually exercise the hardware — a real
  * write to the card, the camera's frame counter, the lights measured through
- * the camera — whose results overwrite the reported ones. See probes.ts.
+ * the camera, the chassis turned under its own power — whose results overwrite
+ * the reported ones. See probes.ts.
  *
- * The motors are not in that sweep. Testing them means turning them, and a
- * robot that twitches while someone has their hands on it is a hazard, so it
- * sits behind its own button.
+ * THE SWEEP TURNS THE MOTORS. It is a third of a second of pivot on the spot,
+ * and it is in the sweep rather than behind a button because a test an operator
+ * has to remember to press is a test that gets skipped. The robot must be on the
+ * ground with hands clear before this panel is opened. The server refuses the
+ * motor probe outright while a run is open, so this can never fire mid-drive.
+ *
+ * The button stays for retesting one row without paying for the whole sweep.
  */
 export function PreflightSection({
   client,
   checks,
   onProbeReport,
+  onSettledChange,
   runActive,
 }: PreflightSectionProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [revealed, setRevealed] = useState(0)
   const [started, setStarted] = useState(false)
+  const [swept, setSwept] = useState(false)
   const [probing, setProbing] = useState(false)
   const [probeError, setProbeError] = useState<string | null>(null)
   const [motorBusy, setMotorBusy] = useState(false)
   const [motorResult, setMotorResult] = useState<string | null>(null)
 
-  const runProbes = useCallback(async () => {
-    setProbing(true)
-    setProbeError(null)
-    try {
-      const report = await client.request<ProbeReport>('/api/preflight', {
-        method: 'POST',
-      })
-      onProbeReport(report)
-    } catch (caught) {
-      onProbeReport(null)
-      setProbeError(readError(caught, 'the probes could not be run'))
-    } finally {
-      setProbing(false)
-    }
-  }, [client, onProbeReport])
+  // Held here as well as in the panel so a single-row retest can be merged into
+  // it, rather than costing a second sweep — and, for the motors, a second turn
+  // of a robot that has already turned once.
+  const [report, setReport] = useState<ProbeReport | null>(null)
+  useEffect(() => onProbeReport(report), [report, onProbeReport])
+
+  const runProbes = useCallback(
+    async (motors: boolean) => {
+      setProbing(true)
+      setProbeError(null)
+      try {
+        setReport(
+          await client.request<ProbeReport>('/api/preflight', {
+            method: 'POST',
+            body: JSON.stringify({ motors }),
+          }),
+        )
+      } catch (caught) {
+        setReport(null)
+        setProbeError(readError(caught, 'the probes could not be run'))
+      } finally {
+        setProbing(false)
+      }
+    },
+    [client],
+  )
 
   const sweep = useCallback(() => {
     setRevealed(0)
     setStarted(true)
-    void runProbes()
+    setSwept(false)
+    // Asked for unconditionally. motor_probe returns `ran: false` when a run is
+    // open rather than turning anything, so the decision stays on the robot,
+    // which is the only side that knows for certain.
+    void runProbes(true).finally(() => setSwept(true))
   }, [runProbes])
 
   // Start once, the first time any part of the section is on screen.
@@ -104,25 +136,36 @@ export function PreflightSection({
     setMotorBusy(true)
     setMotorResult(null)
     try {
-      const result = await client.request<{ ok: boolean; reason: string }>(
-        '/api/preflight/motors',
-        { method: 'POST' },
-      )
+      const result = await client.request<ProbeResult>('/api/preflight/motors', {
+        method: 'POST',
+      })
       setMotorResult(
         result.ok
           ? 'The robot turned on the spot, so the motors are working.'
           : result.reason,
       )
-      // Fold the outcome into the list along with everything else.
-      await runProbes()
+      // Merged rather than re-swept: the robot has just turned, and asking the
+      // sweep to carry the result would turn it a second time for an answer
+      // already in hand.
+      setReport((prev) =>
+        prev ? { ...prev, probes: { ...prev.probes, motors: result } } : prev,
+      )
     } catch (caught) {
       setMotorResult(readError(caught, 'the motor test could not be run'))
     } finally {
       setMotorBusy(false)
     }
-  }, [client, runProbes])
+  }, [client])
 
-  const running = (started && revealed < checks.length) || probing
+  const running = (started && revealed < checks.length) || probing || motorBusy
+  // Not merely "not running": before the first sweep lands there is nothing to
+  // be settled about, and the panel must not read that quiet as a pass. A sweep
+  // that errored leaves no report and does not count either — a robot whose
+  // probes cannot be run is the last one that should go down a pipe on the
+  // strength of what it says about itself.
+  const settled = swept && !running && report !== null
+  useEffect(() => onSettledChange(settled), [settled, onSettledChange])
+
   const failed = blockers(checks)
   const warned = checks.filter((check) => check.status === 'warn')
   const verified = confirmedCount(checks)

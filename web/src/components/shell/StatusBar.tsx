@@ -6,7 +6,7 @@ import * as format from '@/lib/format'
 import { useTempUnit } from '@/lib/units'
 import { useRobot } from '@/robot/RobotProvider'
 
-const LABEL = 'text-[10px] leading-[12px] font-medium text-ink-400'
+const LABEL = 'text-[10px] leading-[12px] font-medium text-ink-300'
 const VALUE = 'tnum text-[14px] leading-[16px] font-semibold'
 
 /**
@@ -78,21 +78,21 @@ export function StatusBar() {
 
         <StatusBarCell>
           <div className={LABEL}>CPU temp</div>
-          <div className={`${VALUE} text-ink-100`}>
+          <div className={`${VALUE} text-ink-200`}>
             {format.temperature(telemetry?.host.cpu_temp_c ?? null, unit)}
           </div>
         </StatusBarCell>
 
         <StatusBarCell>
           <div className={LABEL}>Free</div>
-          <div className={`${VALUE} text-ink-100`}>
+          <div className={`${VALUE} text-ink-200`}>
             <Bytes value={telemetry?.host.storage?.free_bytes ?? null} />
           </div>
         </StatusBarCell>
 
         <StatusBarCell>
           <div className={LABEL}>Elapsed</div>
-          <div className={`${VALUE} text-ink-0`}>
+          <div className={`${VALUE} text-ink-200`}>
             {/* Both ends of this subtraction come from the robot's clock, so a
                 laptop whose clock is off does not skew the run timer. */}
             {telemetry?.run.active

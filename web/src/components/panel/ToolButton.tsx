@@ -40,7 +40,7 @@ export function ToolButton({
           ? tone === 'fault'
             ? 'bg-state-fault-surface text-ink-0'
             : 'bg-ink-800 text-ink-0'
-          : 'text-ink-400 hover:bg-ink-900 hover:text-ink-100'
+          : 'text-ink-350 hover:bg-ink-900 hover:text-ink-0'
       } ${className}`}
       {...props}
     >

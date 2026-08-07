@@ -4,7 +4,7 @@ import type { ReactElement } from 'react'
 interface SidebarNavItemProps {
   to: string
   label: string
-  icon: (props: { className?: string }) => ReactElement
+  icon: (props: { size?: number; className?: string }) => ReactElement
 }
 
 /**
@@ -30,7 +30,7 @@ export function SidebarNavItem({ to, label, icon: Icon }: SidebarNavItemProps) {
         }`
       }
     >
-      <Icon className="size-[19px]" />
+      <Icon size={21} />
       <span className="text-[10.5px] font-medium">{label}</span>
     </NavLink>
   )

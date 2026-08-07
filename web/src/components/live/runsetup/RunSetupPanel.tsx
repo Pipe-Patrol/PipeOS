@@ -81,6 +81,10 @@ export function RunSetupPanel({
   const simulated = useSimulatedFaults()
   // What the probes found when they last ran. Null until the sweep completes.
   const [probes, setProbes] = useState<ProbeReport | null>(null)
+  // False until a sweep has finished. Start is held closed on it: the probes
+  // exist to catch a subsystem that reports healthy and is not, and a run that
+  // can begin before they land is a run that never hears the contradiction.
+  const [preflightSettled, setPreflightSettled] = useState(false)
   const weather = useWeather(origin?.lat ?? null, origin?.lon ?? null)
 
   // Reported, then overwritten by what was actually measured, then by the dev
@@ -101,15 +105,21 @@ export function RunSetupPanel({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  const blocked = failed.length > 0 || !accepted || !preflightSettled || busy
+
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    if (failed.length > 0 || !accepted || busy) return
+    if (blocked) return
     onStart({ name: name.trim(), record, origin })
   }
 
   // Named rather than counted. "2 checks failed" sends an operator hunting up
   // the panel; "Camera: fault" tells them what to go and look at.
-  const blockedReason = !accepted ? 'Confirm the safety check at the bottom of this panel to continue.' : null
+  const blockedReason = !preflightSettled
+    ? 'The preflight checks have to finish before this run can start.'
+    : !accepted
+      ? 'Confirm the safety check at the bottom of this panel to continue.'
+      : null
 
   return (
     <form
@@ -159,7 +169,7 @@ export function RunSetupPanel({
           <div className="flex flex-col gap-2.5">
             <SettingRow
               label="Record video"
-              hint="The video is saved on the robot along with everything else this run records."
+              hint="Video is saved onto the robot SD card."
             >
               <input
                 type="checkbox"
@@ -188,6 +198,7 @@ export function RunSetupPanel({
             client={client}
             checks={checks}
             onProbeReport={setProbes}
+            onSettledChange={setPreflightSettled}
             runActive={telemetry?.run.active === true}
           />
         </Section>
@@ -229,7 +240,7 @@ export function RunSetupPanel({
         <Button
           type="submit"
           variant="primary"
-          disabled={busy || failed.length > 0 || !accepted}
+          disabled={blocked}
           className="w-full"
         >
           {busy ? 'Starting' : 'Start run'}

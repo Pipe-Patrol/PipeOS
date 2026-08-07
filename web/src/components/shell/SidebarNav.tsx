@@ -22,7 +22,7 @@ export function SidebarNav() {
   return (
     <nav className="flex w-[76px] shrink-0 flex-col border-r border-ink-800 bg-ink-950">
       <div className="flex h-14 items-center justify-center border-b border-ink-800">
-        <PipeMark className="size-[22px] text-ink-200" />
+        <PipeMark size={22} className="text-ink-200" />
       </div>
 
       <div className="flex flex-col gap-1 p-2">

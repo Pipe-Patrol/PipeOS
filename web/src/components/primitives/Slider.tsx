@@ -1,3 +1,11 @@
+import type { CSSProperties } from 'react'
+
+/** The `slider` utility's fill, as a share of the track. Pair with `className="slider"`. */
+export function sliderFill(value: number, min: number, max: number): CSSProperties {
+  const pct = max > min ? ((value - min) / (max - min)) * 100 : 0
+  return { '--slider-fill': `${pct}%` } as CSSProperties
+}
+
 interface SliderProps {
   label: string
   value: number
@@ -34,7 +42,8 @@ export function Slider({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="h-1 w-full cursor-pointer appearance-none rounded-full bg-white/20 outline-none [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-text [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-text"
+        style={sliderFill(value, min, max)}
+        className="slider"
       />
     </label>
   )

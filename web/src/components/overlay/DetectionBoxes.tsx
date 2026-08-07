@@ -55,7 +55,7 @@ export function DetectionBoxes({ detections, now }: DetectionBoxesProps) {
               opacity: fade(age),
             }}
           >
-            <span className="absolute -top-5 left-0 bg-state-warning-signal/20 px-1 text-[10px] tracking-[0.06em] text-state-warning-signal uppercase">
+            <span className="overlay-shadow absolute -top-5 left-0 bg-state-warning-signal/20 px-1 text-[10px] tracking-[0.06em] text-state-warning-signal uppercase">
               {detection.label} {Math.round(detection.confidence * 100)}%
             </span>
           </div>
@@ -67,7 +67,7 @@ export function DetectionBoxes({ detections, now }: DetectionBoxesProps) {
           {unlocalised.map((detection) => (
             <li
               key={detection.id}
-              className="text-[11px] tracking-[0.06em] text-state-warning-signal uppercase"
+              className="overlay-shadow text-[11px] tracking-[0.06em] text-state-warning-signal uppercase"
               style={{ opacity: fade(now - detection.at) }}
               title="Classified, but not localised — no box available"
             >

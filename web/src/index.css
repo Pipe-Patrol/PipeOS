@@ -18,6 +18,8 @@
   --color-ink-100: #ededed;
   --color-ink-200: #d6d6d6;
   --color-ink-300: #b0b0b0;
+  /** Between 300 and 400: the tool rail, which must read without shouting. */
+  --color-ink-350: #9d9d9d;
   --color-ink-400: #8a8a8a;
   --color-ink-500: #666666;
   --color-ink-600: #4a4a4a;
@@ -84,6 +86,11 @@
   --font-sans:
     'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
 
+  /* ---- The shadow under anything sitting on the video ---- */
+  --overlay-shadow:
+    0 1px 2px rgb(0 0 0 / 0.95), 0 2px 8px rgb(0 0 0 / 0.85),
+    0 0 20px rgb(0 0 0 / 0.7);
+
   /* ---- Corner radii. Everything is rounded; nothing squares off. ---- */
   --radius-sm: 8px;
   --radius-panel: 12px;
@@ -112,18 +119,16 @@ body,
   font-feature-settings: 'tnum' 1;
 }
 
-/*
- * The overlay readout style: white text sitting IN the video, with no panel.
- *
- * A filled box over the frame reads as a different app bolted on top. Because
- * the pipe wall can be any brightness, a shadow does the legibility work a
- * background would otherwise do.
- */
+/** The overlay shadow alone, for text that sets its own colour. */
+@utility overlay-shadow {
+  text-shadow: var(--overlay-shadow);
+}
+
+/* White text sitting IN the video, with no panel. The shadow does the work a
+ * background would otherwise do. */
 @utility overlay-text {
-  color: rgb(255 255 255 / 0.82);
-  text-shadow:
-    0 1px 4px rgb(0 0 0 / 0.9),
-    0 0 14px rgb(0 0 0 / 0.55);
+  color: rgb(255 255 255 / 0.92);
+  text-shadow: var(--overlay-shadow);
 }
 
 /*
@@ -140,7 +145,7 @@ body,
     color: rgb(255 255 255 / 1);
   }
   to {
-    color: rgb(255 255 255 / 0.82);
+    color: rgb(255 255 255 / 0.92);
   }
 }
 
@@ -162,15 +167,78 @@ body,
  * at ink-400 over a wet grey brick the word "Air" simply disappears.
  */
 @utility overlay-label {
-  font-size: 10.5px;
-  line-height: 13px;
+  font-size: 10px;
+  line-height: 12px;
   font-weight: 500;
-  color: rgb(255 255 255 / 0.72);
+  color: rgb(255 255 255 / 0.85);
   letter-spacing: 0.02em;
   white-space: nowrap;
-  text-shadow:
-    0 1px 4px rgb(0 0 0 / 0.9),
-    0 0 14px rgb(0 0 0 / 0.55);
+  text-shadow: var(--overlay-shadow);
+}
+
+/**
+ * A range input. The native control gives no thumb once `appearance` is cleared
+ * and never fills the track behind it, so both are drawn here — the filled
+ * portion is the whole point, it answers "how far up is this?" without reading
+ * the number. `--slider-fill` is set per value at the call site.
+ */
+@utility slider {
+  appearance: none;
+  height: 4px;
+  width: 100%;
+  cursor: pointer;
+  outline: none;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--color-ink-100) 0 var(--slider-fill, 0%),
+    var(--color-ink-700) var(--slider-fill, 0%) 100%
+  );
+
+  &::-webkit-slider-runnable-track {
+    background: transparent;
+  }
+
+  &::-webkit-slider-thumb {
+    appearance: none;
+    height: 12px;
+    width: 12px;
+    border-radius: 999px;
+    background: var(--color-ink-100);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
+  }
+
+  &::-moz-range-track {
+    background: transparent;
+  }
+
+  &::-moz-range-thumb {
+    height: 12px;
+    width: 12px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--color-ink-100);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
+  }
+}
+
+/**
+ * The lamp tool, glowing in proportion to the LED level (`--glow`, 0 to 1).
+ *
+ * The rail's filled-block active state only says "on", and on a ring that runs
+ * 0-100% that is the less useful half of the answer. The bloom carries the rest,
+ * so brightness is legible from the rail without opening the panel.
+ */
+@utility lamp-glow {
+  display: inline-flex;
+  /* Two shadows: a tight one for the filament, a wide one for the halo. */
+  filter: drop-shadow(
+      0 0 calc(var(--glow, 0) * 5px) rgb(255 255 255 / calc(var(--glow, 0) * 0.95))
+    )
+    drop-shadow(
+      0 0 calc(var(--glow, 0) * 13px) rgb(255 255 255 / calc(var(--glow, 0) * 0.6))
+    );
+  transition: filter 160ms ease-out;
 }
 
 /** Section labels and column headers. Small, spaced, never shouty. */

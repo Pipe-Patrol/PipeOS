@@ -16,6 +16,7 @@ export interface Shortcut {
 export const SHORTCUTS: Shortcut[] = [
   { keys: 'W / ↑', action: 'Drive forward', group: 'Driving' },
   { keys: 'S / ↓', action: 'Drive back', group: 'Driving' },
+  { keys: 'Shift', action: 'Lock the throttle · Shift again to release', group: 'Driving' },
 
   { keys: 'C', action: 'Take a snapshot', group: 'Capture' },
   { keys: 'Gamepad A', action: 'Take a snapshot', group: 'Capture' },

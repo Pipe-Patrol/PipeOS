@@ -87,6 +87,32 @@ class TestLed:
         assert client.post("/api/led", json={"level": 0.5}).status_code == 200
 
 
+class TestPreflight:
+    """The sweep, and the one probe in it that moves the robot."""
+
+    def test_sweep_leaves_the_motors_alone_unless_asked(self, client):
+        probes = client.post("/api/preflight").json()["probes"]
+        assert "storage" in probes
+        assert "motors" not in probes
+
+    def test_sweep_includes_the_motors_when_asked(self, client):
+        probes = client.post("/api/preflight", json={"motors": True}).json()["probes"]
+        assert "motors" in probes
+
+    def test_a_run_in_progress_refuses_the_motors_but_not_the_sweep(self, client):
+        client.post("/api/runs", json={"name": "a"})
+
+        probes = client.post("/api/preflight", json={"motors": True}).json()["probes"]
+        # Refused, and reported as not-run rather than as a failure: the console
+        # leaves a `ran: false` row showing whatever telemetry says.
+        assert probes["motors"]["ran"] is False
+        assert probes["storage"]["ran"] is True
+
+    def test_the_motor_route_is_a_conflict_during_a_run(self, client):
+        client.post("/api/runs", json={"name": "a"})
+        assert client.post("/api/preflight/motors").status_code == 409
+
+
 class TestRuns:
     def test_start_list_and_end(self, client):
         started = client.post("/api/runs", json={"name": "MH12"}).json()["run"]

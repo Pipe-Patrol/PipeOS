@@ -12,6 +12,15 @@ export default tseslint.config(
   // eslintrc shape and ESLint 10 rejects it outright.
   reactHooks.configs.flat['recommended-latest'],
   prettier,
+  // Build and audit scripts. Node, not a browser, and not TypeScript.
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+  },
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {

@@ -16,6 +16,11 @@ import { GAMEPAD_BUTTONS, useGamepad } from '@/input/useGamepad'
  *   keyboard   full speed, wins while a key is held
  *   nothing    zero — which is still a command, and still gets sent
  *
+ * Shift latches the current direction so a long crawl does not have to be held
+ * down. It is a convenience over the key, not a second control path: a latched
+ * throttle drops on every one of the releases below, exactly as a held key
+ * does.
+ *
  * The safety rules here mirror the ones in the server, on purpose. Losing
  * focus, hiding the tab, or dropping the link all zero the throttle locally
  * rather than waiting for the watchdog: the watchdog is the backstop, not the
@@ -31,10 +36,24 @@ export interface DriveInput {
   source: DriveSource
   gamepadConnected: boolean
   gamepadId: string | null
+  /** True while Shift is holding the throttle open with no key down. */
+  locked: boolean
+  /** True once a drive key has been held long enough to be worth a hint. */
+  lockHint: boolean
 }
 
 const KEY_FORWARD = new Set(['KeyW', 'ArrowUp'])
 const KEY_REVERSE = new Set(['KeyS', 'ArrowDown'])
+const KEY_LOCK = new Set(['ShiftLeft', 'ShiftRight'])
+
+/**
+ * How long a key must be held before the hint appears.
+ *
+ * Long enough that it never flashes during the taps and nudges that make up most
+ * driving, short enough to arrive while the operator is still in the hold that
+ * prompted it.
+ */
+const LOCK_HINT_DELAY_MS = 2500
 
 export interface DriveInputOptions {
   client: RobotClient | null
@@ -49,14 +68,23 @@ export function useDriveInput({
   onSnapshot,
 }: DriveInputOptions): DriveInput {
   const [keys, setKeys] = useState({ forward: false, reverse: false })
+  const [locked, setLocked] = useState<DriveDirection>(null)
+  const [hintArmed, setHintArmed] = useState(false)
   const gamepad = useGamepad()
+
+  // What Shift would latch if it were pressed right now. Read inside the key
+  // handler, so it has to be a ref rather than a closed-over value.
+  const directionRef = useRef<DriveDirection>(null)
 
   const onSnapshotRef = useRef(onSnapshot)
   useEffect(() => {
     onSnapshotRef.current = onSnapshot
   })
 
-  const release = useCallback(() => setKeys({ forward: false, reverse: false }), [])
+  const release = useCallback(() => {
+    setKeys({ forward: false, reverse: false })
+    setLocked(null)
+  }, [])
 
   // --- keyboard ---
 
@@ -64,12 +92,30 @@ export function useDriveInput({
     if (!enabled) return
 
     const down = (event: KeyboardEvent) => {
+      if (KEY_LOCK.has(event.code)) {
+        if (event.repeat) return
+        // Latch what is moving now; press again to let go. Shift with nothing
+        // moving does nothing — the lock can only ever extend a command the
+        // operator has already given.
+        setLocked((current) => (current ? null : directionRef.current))
+        return
+      }
+
+      if (event.code === 'Escape') {
+        setLocked(null)
+        return
+      }
+
       if (event.repeat) return
       if (KEY_FORWARD.has(event.code)) {
         event.preventDefault()
+        // Touching a drive key takes manual control back. The key is now held,
+        // so this reads as "grab the throttle", not "stop".
+        setLocked(null)
         setKeys((current) => ({ ...current, forward: true }))
       } else if (KEY_REVERSE.has(event.code)) {
         event.preventDefault()
+        setLocked(null)
         setKeys((current) => ({ ...current, reverse: true }))
       }
     }
@@ -111,9 +157,25 @@ export function useDriveInput({
     if (gamepad.pressed.includes(GAMEPAD_BUTTONS.A)) onSnapshotRef.current?.()
   }, [enabled, gamepad.pressed])
 
+  // --- hint ---
+
+  const holding = keys.forward || keys.reverse
+  useEffect(() => {
+    if (!enabled || locked || !holding) return
+    const timer = window.setTimeout(() => setHintArmed(true), LOCK_HINT_DELAY_MS)
+    // Disarmed on the way out so the next hold has to earn the delay again
+    // rather than flashing the hint the instant a key goes down.
+    return () => {
+      window.clearTimeout(timer)
+      setHintArmed(false)
+    }
+  }, [enabled, locked, holding])
+
   // --- resolve and send ---
 
-  const keyboardThrottle = (keys.forward ? 1 : 0) - (keys.reverse ? 1 : 0)
+  const lockedThrottle = locked === 'forward' ? 1 : locked === 'reverse' ? -1 : 0
+  const heldThrottle = (keys.forward ? 1 : 0) - (keys.reverse ? 1 : 0)
+  const keyboardThrottle = locked ? lockedThrottle : heldThrottle
   const gamepadThrottle = enabled ? gamepad.throttle : 0
 
   let throttle = 0
@@ -137,11 +199,22 @@ export function useDriveInput({
     return () => client?.setDrive(0, 0)
   }, [client])
 
+  const direction: DriveDirection =
+    throttle > 0 ? 'forward' : throttle < 0 ? 'reverse' : null
+
+  useEffect(() => {
+    directionRef.current = direction
+  })
+
   return {
     throttle,
-    direction: throttle > 0 ? 'forward' : throttle < 0 ? 'reverse' : null,
+    direction,
     source,
     gamepadConnected: gamepad.connected,
     gamepadId: gamepad.id,
+    locked: locked !== null,
+    // Derived rather than stored, so there is no state that can survive the
+    // key being let go and leave a hint hanging over the video.
+    lockHint: hintArmed && holding && !locked,
   }
 }

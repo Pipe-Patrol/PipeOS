@@ -19,6 +19,10 @@ server/data/
 # Local-only temporary testing (in-browser robot simulator). Private.
 temptest/
 
+# Generated reports. Regenerate with the script that made them, don't commit
+# the output -- a checked-in copy audit is wrong the moment anyone edits a word.
+audit/
+
 # Editors / OS
 .DS_Store
 .gstack/

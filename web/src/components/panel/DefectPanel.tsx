@@ -239,7 +239,7 @@ export function DefectPanel({
           <Info
             label="Clock position"
             value={clock ? `${clock} o'clock` : format.BLANK}
-            icon={<ClockIcon className="size-[11px]" />}
+            icon={<ClockIcon size={11} />}
           />
           <Info label="Distance from entry" value={format.metres(motion.chainage_m)} />
           <Info label="Time logged" value={new Date(now).toLocaleTimeString()} />
