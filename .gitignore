@@ -29,3 +29,9 @@ audit/
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+
+# The exported model. Produced by server/deploy/export-model.py on a laptop and
+# copied to the robot by deploy.sh — see MODEL.md. Kept out of git because it is
+# a ~115 MB binary regenerated from checkpoint_best_total.pth, and git is the
+# wrong place to version a build artefact that large.
+server/model/*.onnx

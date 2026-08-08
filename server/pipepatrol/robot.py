@@ -23,7 +23,7 @@ import time
 from pipepatrol import config, telemetry
 from pipepatrol.estimation import Hazards, OpticalFlow, Odometry
 from pipepatrol.hardware import Camera, Climate, Drive, IMU, Lights, host
-from pipepatrol.perception import DetectionService
+from pipepatrol.perception import DetectionService, best_detector
 from pipepatrol.runs import Recorder, RunStore
 
 log = logging.getLogger(__name__)
@@ -52,7 +52,11 @@ class Robot:
             chainage=lambda: self.odometry.status()["chainage_m"],
         )
         self.detections = DetectionService(
-            self.camera, chainage_source=lambda: self.odometry.status()["chainage_m"]
+            self.camera,
+            # The real model when it is installed, and an honest absence when it
+            # is not. Either way the console renders detections the same way.
+            detector=best_detector(),
+            chainage_source=lambda: self.odometry.status()["chainage_m"],
         )
 
         self._active_run_id = None

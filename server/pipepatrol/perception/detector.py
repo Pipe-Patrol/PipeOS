@@ -57,10 +57,18 @@ class Detection:
 
 
 class NullDetector:
-    """The backend in use until a model exists. Reports itself as absent."""
+    """No model. Carries the reason, so the console can say which.
+
+    `note` is why: no ONNX file, no runtime, a graph that would not load. An
+    operator can do something about each of those, and "detection unavailable"
+    on its own tells them nothing.
+    """
 
     name = "none"
     available = False
+
+    def __init__(self, note=None):
+        self.error = note
 
     def infer(self, jpeg):  # noqa: ARG002 - the signature is the contract
         return []
@@ -160,5 +168,7 @@ class DetectionService:
             "backend": self._detector.name,
             "available": self._detector.available,
             "last_inference_ms": self._last_ms,
-            "error": self._error,
+            # A fault raised while running outranks the reason the backend gave
+            # for being absent: the first is happening now.
+            "error": self._error or getattr(self._detector, "error", None),
         }

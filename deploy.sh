@@ -99,6 +99,18 @@ npm run build
 # .venv is excluded deliberately: it contains absolute paths and links against
 # the host's Python, so a copied one is broken on arrival.
 
+# The exported model rides along inside server/. It is not in server/data,
+# which is excluded above because that is where the robot keeps its own runs.
+if [ -f "$HERE/server/model/pipe-defects.onnx" ]; then
+  echo "defect model: $(du -h "$HERE/server/model/pipe-defects.onnx" | cut -f1) — will be copied"
+else
+  echo "defect model: NOT PRESENT — the robot will run with detection disabled."
+  echo "  Export it first (on a laptop, not the Pi):"
+  echo "    python3 -m venv /tmp/export"
+  echo "    /tmp/export/bin/pip install rfdetr onnx onnxruntime"
+  echo "    /tmp/export/bin/python server/deploy/export-model.py ~/Downloads/checkpoint_best_total.pth"
+fi
+
 step "Copying to $TARGET"
 cd "$HERE"
 rsync -az --delete \
@@ -129,6 +141,18 @@ fi
 
 echo "checking the safety limits before anything can drive:"
 .venv/bin/python -m pytest tests/test_drive_safety.py -q
+
+echo "checking the defect model:"
+.venv/bin/python - <<'CHECK'
+from pipepatrol.perception import RfDetrDetector
+
+detector = RfDetrDetector()
+if detector.available:
+    print(f"  ready — {detector.model_path.name} at {detector._size}px")
+else:
+    print(f"  NOT LOADED — {detector.error}")
+    print("  The robot will drive and record normally; nothing will be detected.")
+CHECK
 REMOTE
 
 # --- 5. the DHT overlay -------------------------------------------------------
