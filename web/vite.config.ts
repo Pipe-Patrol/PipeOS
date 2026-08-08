@@ -15,6 +15,7 @@ import { defineConfig } from 'vitest/config'
 // if the folder is deleted the dev import just 404s and the double-tap-T
 // gesture goes inert. See web/src/dev/tempTest.ts and temptest/README.md.
 const temptestSim = fileURLToPath(new URL('../temptest/sim.ts', import.meta.url))
+const modelLab = fileURLToPath(new URL('../temptest/model-lab.html', import.meta.url))
 const sampleFrame = fileURLToPath(new URL('../temptest/sample-pipe.jpg', import.meta.url))
 
 /**
@@ -38,6 +39,22 @@ function simMediaPlugin(): Plugin {
     name: 'temptest-sim-media',
     apply: 'serve',
     configureServer(server) {
+      // The model lab: /model-lab, straight out of temptest. It exists because
+      // the console can only show detections inside a run, and a run needs
+      // preflight, which needs hardware a laptop does not have — so there was
+      // no way to answer "does the model work" without a robot.
+      server.middlewares.use(async (req, res, next) => {
+        if (!req.url || req.url.split('?')[0] !== '/model-lab') return next()
+        try {
+          const page = await readFile(modelLab)
+          res.setHeader('Content-Type', 'text/html; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(page)
+        } catch {
+          next()
+        }
+      })
+
       server.middlewares.use(async (req, res, next) => {
         if (!req.url || !wantsFrame(req.url)) return next()
         try {

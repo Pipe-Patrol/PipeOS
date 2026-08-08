@@ -171,7 +171,7 @@ class DetectionService:
 
             self._stop.wait(max(0.0, MIN_INFERENCE_INTERVAL_S - elapsed))
 
-    def infer_once(self, jpeg):
+    def infer_once(self, jpeg, min_confidence=None):
         """Run the detector against a frame from somewhere other than the camera.
 
         Used by demo mode, which feeds recorded footage in from the console. It
@@ -182,7 +182,13 @@ class DetectionService:
         # Marked before the inference, not after: a slow model must not let the
         # camera loop start a second one while this is still running.
         self._supplied_at = time.monotonic()
-        found = self._detector.infer(jpeg)
+        # Not every backend takes a floor -- NullDetector does not -- so it is
+        # only passed when asked for.
+        found = (
+            self._detector.infer(jpeg, min_confidence)
+            if min_confidence is not None
+            else self._detector.infer(jpeg)
+        )
         self._supplied_at = time.monotonic()
         chainage = self._chainage_source() if self._chainage_source else None
         for detection in found:

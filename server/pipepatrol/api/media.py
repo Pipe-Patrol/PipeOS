@@ -62,7 +62,9 @@ async def get_camera_still(robot=Depends(get_robot)):
 
 
 @router.post("/api/detect")
-async def post_detect(request: Request, robot=Depends(get_robot)):
+async def post_detect(
+    request: Request, min: float | None = None, robot=Depends(get_robot)
+):
     """Run the model against a frame the console supplied, rather than the camera.
 
     This is what makes demo day honest. On demo day the robot is on a table and
@@ -87,7 +89,10 @@ async def post_detect(request: Request, robot=Depends(get_robot)):
         return JSONResponse({"error": "no frame supplied"}, status_code=400)
 
     try:
-        found = robot.detections.infer_once(jpeg)
+        # `min` lowers the confidence floor, for the model lab: on a frame with
+        # no detections the best score reached is what says whether the model
+        # looked and was unconvinced, or is simply not working.
+        found = robot.detections.infer_once(jpeg, min_confidence=min)
     except Exception as exc:  # noqa: BLE001 - a model fault must not stop the console
         log.warning("supplied-frame inference failed: %s", exc)
         return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)

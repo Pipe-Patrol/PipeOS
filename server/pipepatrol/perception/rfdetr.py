@@ -143,8 +143,14 @@ class RfDetrDetector:
             options.intra_op_num_threads,
         )
 
-    def infer(self, jpeg):
-        """One frame in, a list of Detections out. Boxes are normalised xyxy."""
+    def infer(self, jpeg, min_confidence=None):
+        """One frame in, a list of Detections out. Boxes are normalised xyxy.
+
+        `min_confidence` overrides the floor, and exists for one reason: on a
+        frame where the model finds nothing, the top score it *did* reach is the
+        only thing that distinguishes "looked and was not convinced" from
+        "broken and returns nothing for everything". The lab asks for zero.
+        """
         if not self.available:
             return []
 
@@ -158,7 +164,7 @@ class RfDetrDetector:
         started = time.monotonic()
         tensor = self._prepare(image)
         outputs = self._session.run(None, {self._input: tensor})
-        found = self._decode(outputs)
+        found = self._decode(outputs, min_confidence)
         log.debug(
             "inference %.0f ms, %d detections", (time.monotonic() - started) * 1000, len(found)
         )
@@ -191,7 +197,7 @@ class RfDetrDetector:
         rgb = (rgb - np.array(MEAN, dtype=np.float32)) / np.array(STD, dtype=np.float32)
         return np.transpose(rgb, (2, 0, 1))[None, ...].astype(np.float32)
 
-    def _decode(self, outputs):
+    def _decode(self, outputs, min_confidence=None):
         """Model output to Detections, in the original frame's coordinates.
 
         RF-DETR emits `boxes` as cxcywh normalised to the padded square and
@@ -214,11 +220,12 @@ class RfDetrDetector:
         best_score = usable.max(axis=1)
 
         keep = np.argsort(-best_score)[:MAX_DETECTIONS]
+        floor = MIN_CONFIDENCE if min_confidence is None else float(min_confidence)
 
         found = []
         for index in keep:
             score = float(best_score[index])
-            if score < MIN_CONFIDENCE:
+            if score < floor:
                 break  # sorted, so everything after this is worse
 
             # cxcywh, already normalised to the whole frame because the input
