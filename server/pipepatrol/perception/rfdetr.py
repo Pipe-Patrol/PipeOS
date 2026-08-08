@@ -156,9 +156,9 @@ class RfDetrDetector:
             return []
 
         started = time.monotonic()
-        tensor, pad = self._prepare(image)
+        tensor = self._prepare(image)
         outputs = self._session.run(None, {self._input: tensor})
-        found = self._decode(outputs, pad)
+        found = self._decode(outputs)
         log.debug(
             "inference %.0f ms, %d detections", (time.monotonic() - started) * 1000, len(found)
         )
@@ -167,32 +167,31 @@ class RfDetrDetector:
     # --- internals ---
 
     def _prepare(self, image):
-        """Square, letterboxed, normalised, NCHW.
+        """Square, normalised, NCHW.
 
-        LETTERBOXED RATHER THAN STRETCHED. The camera is 4:3 and the model wants
-        a square; scaling to fit would squash a round pipe into an ellipse and
-        every box with it. The padding is remembered so the boxes can be mapped
-        back onto the original frame rather than onto the padded one.
+        STRETCHED, NOT LETTERBOXED, and that is not a shortcut -- it is what the
+        model was trained on. RF-DETR resizes straight to a square
+        (`F.resize(t, [res, res])`, and `square_resize_div_64` in this
+        checkpoint's training args), so a 4:3 frame is squashed to 1:1 on the
+        way in. Letterboxing instead would present the model with black bars and
+        a different aspect ratio than every image it learned from, which shows
+        up as confidence collapsing across the board rather than as an error.
+
+        Bilinear without antialiasing, to match the Albumentations resize used
+        in training -- cv2.INTER_LINEAR is exactly that.
+
+        Because the whole frame maps to the whole square, boxes come back
+        already normalised to the original frame and need no correction.
         """
         np, cv2 = self._np, self._cv2
-        height, width = image.shape[:2]
         size = self._size
 
-        scale = min(size / width, size / height)
-        new_w, new_h = int(round(width * scale)), int(round(height * scale))
-        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-
-        canvas = np.zeros((size, size, 3), dtype=np.uint8)
-        left, top = (size - new_w) // 2, (size - new_h) // 2
-        canvas[top : top + new_h, left : left + new_w] = resized
-
-        rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        resized = cv2.resize(image, (size, size), interpolation=cv2.INTER_LINEAR)
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         rgb = (rgb - np.array(MEAN, dtype=np.float32)) / np.array(STD, dtype=np.float32)
-        tensor = np.transpose(rgb, (2, 0, 1))[None, ...].astype(np.float32)
+        return np.transpose(rgb, (2, 0, 1))[None, ...].astype(np.float32)
 
-        return tensor, (left / size, top / size, new_w / size, new_h / size)
-
-    def _decode(self, outputs, pad):
+    def _decode(self, outputs):
         """Model output to Detections, in the original frame's coordinates.
 
         RF-DETR emits `boxes` as cxcywh normalised to the padded square and
@@ -215,7 +214,6 @@ class RfDetrDetector:
         best_score = usable.max(axis=1)
 
         keep = np.argsort(-best_score)[:MAX_DETECTIONS]
-        left, top, span_w, span_h = pad
 
         found = []
         for index in keep:
@@ -223,15 +221,11 @@ class RfDetrDetector:
             if score < MIN_CONFIDENCE:
                 break  # sorted, so everything after this is worse
 
+            # cxcywh, already normalised to the whole frame because the input
+            # was stretched to fill the square rather than padded into it.
             cx, cy, w, h = (float(v) for v in boxes[index])
             x1, y1 = cx - w / 2, cy - h / 2
             x2, y2 = cx + w / 2, cy + h / 2
-
-            # Undo the letterbox: strip the padding, rescale to the frame.
-            x1 = (x1 - left) / span_w
-            x2 = (x2 - left) / span_w
-            y1 = (y1 - top) / span_h
-            y2 = (y2 - top) / span_h
 
             box = [
                 max(0.0, min(1.0, x1)),

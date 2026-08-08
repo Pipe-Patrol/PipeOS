@@ -29,6 +29,21 @@ DETECTION_TTL_S = 6.0
 # Never start an inference more often than this, however fast the model is.
 MIN_INFERENCE_INTERVAL_S = 0.2
 
+# How long a supplied frame keeps the camera loop out of the way.
+#
+# WHY THIS EXISTS. In demo mode the console feeds recorded footage in through
+# `infer_once`, and the camera is pointed at whatever the robot is sitting on --
+# a table, usually. Left running, the sampling loop below would spend the Pi's
+# cores inferring over a ceiling while the frames somebody is actually watching
+# queue behind it. On hardware where one inference is seconds, that is the
+# difference between a demo that responds and one that does not.
+#
+# A timeout rather than an explicit pause/resume pair: a browser that closes, a
+# tab that crashes or a console that drops off the network all leave an explicit
+# pause latched on forever, and the robot would come back from demo day with
+# detection silently switched off.
+DEMO_HOLDOFF_S = 5.0
+
 
 class Detection:
     """One model output, stamped with where and when it was seen."""
@@ -92,6 +107,8 @@ class DetectionService:
         self._thread = None
         self._last_ms = None
         self._error = None
+        # When a frame last arrived from somewhere other than the camera.
+        self._supplied_at = 0.0
 
     @property
     def available(self):
@@ -122,6 +139,12 @@ class DetectionService:
     def _run(self):
         while not self._stop.is_set():
             started = time.monotonic()
+
+            # Something else is feeding this model. Stay out of its way.
+            if started - self._supplied_at < DEMO_HOLDOFF_S:
+                self._stop.wait(0.25)
+                continue
+
             jpeg = self._camera.latest_jpeg()
             if jpeg is None:
                 self._stop.wait(0.5)
@@ -156,7 +179,11 @@ class DetectionService:
         above: there is no video to hold up, and the caller wants the answer for
         the frame it just sent rather than for whatever the camera saw last.
         """
+        # Marked before the inference, not after: a slow model must not let the
+        # camera loop start a second one while this is still running.
+        self._supplied_at = time.monotonic()
         found = self._detector.infer(jpeg)
+        self._supplied_at = time.monotonic()
         chainage = self._chainage_source() if self._chainage_source else None
         for detection in found:
             if detection.chainage_m is None:

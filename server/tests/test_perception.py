@@ -58,26 +58,21 @@ def _detector(size=560):
 
 
 class TestBoxMapping:
-    """Boxes come back in the padded square and have to land on the frame."""
+    """cxcywh out of the model, xyxy on the frame."""
 
-    def test_a_centred_box_stays_centred(self):
+    def test_cxcywh_becomes_xyxy(self):
         detector = _detector()
-        # 4:3 letterboxed into a square leaves bars top and bottom.
-        pad = (0.0, 0.125, 1.0, 0.75)
         logits = np.full((1, 1, len(CLASS_NAMES) + 2), -10.0, dtype=np.float32)
         logits[0, 0, 1] = 10.0  # confidently a crack
-        boxes = np.array([[[0.5, 0.5, 0.2, 0.2]]], dtype=np.float32)
+        boxes = np.array([[[0.5, 0.4, 0.2, 0.1]]], dtype=np.float32)
 
-        found = detector._decode([logits, boxes], pad)
+        found = detector._decode([logits, boxes])
 
         assert len(found) == 1
-        x1, y1, x2, y2 = found[0].box
         assert found[0].label == "crack"
-        # Centre survives; the vertical extent is stretched by the bars removed.
-        assert (x1 + x2) / 2 == pytest.approx(0.5, abs=1e-6)
-        assert (y1 + y2) / 2 == pytest.approx(0.5, abs=1e-6)
-        assert x2 - x1 == pytest.approx(0.2, abs=1e-6)
-        assert y2 - y1 == pytest.approx(0.2 / 0.75, abs=1e-6)
+        # The frame is stretched to the square on the way in, so the box comes
+        # back already normalised to the frame -- no padding to undo.
+        assert found[0].box == pytest.approx([0.4, 0.35, 0.6, 0.45], abs=1e-6)
 
     def test_boxes_are_clamped_to_the_frame(self):
         detector = _detector()
@@ -86,7 +81,7 @@ class TestBoxMapping:
         # Half outside the picture on the left.
         boxes = np.array([[[0.0, 0.5, 0.4, 0.2]]], dtype=np.float32)
 
-        found = detector._decode([logits, boxes], (0.0, 0.0, 1.0, 1.0))
+        found = detector._decode([logits, boxes])
 
         assert all(0.0 <= value <= 1.0 for value in found[0].box)
 
@@ -98,7 +93,7 @@ class TestBoxMapping:
         logits[0, 0, 3] = 1.0  # a real class, quieter
         boxes = np.array([[[0.5, 0.5, 0.2, 0.2]]], dtype=np.float32)
 
-        found = detector._decode([logits, boxes], (0.0, 0.0, 1.0, 1.0))
+        found = detector._decode([logits, boxes])
 
         assert [d.label for d in found] == ["incrustation"]
 
@@ -111,7 +106,7 @@ class TestBoxMapping:
             [[[0.5, 0.5, 0.2, 0.2], [0.2, 0.2, 0.1, 0.1]]], dtype=np.float32
         )
 
-        found = detector._decode([logits, boxes], (0.0, 0.0, 1.0, 1.0))
+        found = detector._decode([logits, boxes])
 
         assert len(found) == 1
         assert found[0].confidence >= MIN_CONFIDENCE
@@ -123,27 +118,87 @@ class TestBoxMapping:
         logits[0, 0, 1] = 10.0
         boxes = np.array([[[0.5, 0.5, 0.2, 0.2]]], dtype=np.float32)
 
-        forwards = detector._decode([logits, boxes], (0.0, 0.0, 1.0, 1.0))
-        backwards = detector._decode([boxes, logits], (0.0, 0.0, 1.0, 1.0))
+        forwards = detector._decode([logits, boxes])
+        backwards = detector._decode([boxes, logits])
 
         assert [d.box for d in forwards] == [d.box for d in backwards]
 
 
-class TestLetterbox:
-    """The frame is 4:3 and the model wants a square."""
+class TestPreprocessing:
+    """The frame is 4:3 and the model wants a square. It is stretched, not padded.
 
-    def test_a_wide_frame_is_padded_not_stretched(self):
+    That is what RF-DETR does at inference and what this checkpoint was trained
+    with (`square_resize_div_64`). Letterboxing instead puts black bars and the
+    wrong aspect ratio in front of a model that never saw either, and the
+    symptom is confidence collapsing everywhere rather than an exception.
+    """
+
+    def test_a_wide_frame_is_stretched_to_the_square(self):
         cv2 = pytest.importorskip("cv2")
         detector = _detector(size=64)
         detector._cv2 = cv2
 
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        tensor, pad = detector._prepare(frame)
+        tensor = detector._prepare(frame)
 
         assert tensor.shape == (1, 3, 64, 64)
-        left, top, span_w, span_h = pad
-        # Full width, bars top and bottom, and the aspect preserved exactly.
-        assert span_w == pytest.approx(1.0, abs=0.02)
-        assert span_h == pytest.approx(0.75, abs=0.02)
-        assert left == pytest.approx(0.0, abs=0.02)
-        assert top == pytest.approx(0.125, abs=0.02)
+
+    def test_no_black_bars_are_introduced(self):
+        """A padded frame would leave rows that are pure background."""
+        cv2 = pytest.importorskip("cv2")
+        detector = _detector(size=64)
+        detector._cv2 = cv2
+
+        # Uniform mid-grey. After a correct stretch every pixel of a channel
+        # holds the same value; after letterboxing the top and bottom rows
+        # would be black instead. Checked per channel, because the three
+        # ImageNet constants differ and the channels legitimately do not match
+        # each other.
+        frame = np.full((480, 640, 3), 128, dtype=np.uint8)
+        tensor = detector._prepare(frame)[0]
+
+        for channel in tensor:
+            assert channel.min() == pytest.approx(channel.max(), abs=1e-5)
+
+    def test_imagenet_normalisation_is_applied(self):
+        cv2 = pytest.importorskip("cv2")
+        detector = _detector(size=8)
+        detector._cv2 = cv2
+
+        # Pure white through ImageNet stats lands well above 1.0.
+        tensor = detector._prepare(np.full((16, 16, 3), 255, dtype=np.uint8))
+        assert tensor.max() > 2.0
+
+
+class TestDemoHoldoff:
+    """Supplied frames take priority over the camera.
+
+    On the robot both paths share four cores and one inference is seconds, so a
+    camera loop grinding through pictures of a table while somebody is watching
+    imported footage is the difference between a demo that responds and one that
+    does not.
+    """
+
+    def test_a_supplied_frame_holds_the_camera_loop_off(self):
+        from pipepatrol.perception.detector import DEMO_HOLDOFF_S, DetectionService
+
+        service = DetectionService(camera=None, detector=NullDetector())
+        assert service._supplied_at == 0.0
+
+        service.infer_once(b"a frame from the console")
+
+        import time
+
+        held = time.monotonic() - service._supplied_at
+        assert held < DEMO_HOLDOFF_S
+
+    def test_the_holdoff_expires_on_its_own(self):
+        """A closed browser must not leave detection switched off forever."""
+        import time
+
+        from pipepatrol.perception.detector import DEMO_HOLDOFF_S, DetectionService
+
+        service = DetectionService(camera=None, detector=NullDetector())
+        service._supplied_at = time.monotonic() - DEMO_HOLDOFF_S - 1
+
+        assert time.monotonic() - service._supplied_at > DEMO_HOLDOFF_S

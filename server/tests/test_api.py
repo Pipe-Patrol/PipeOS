@@ -32,7 +32,10 @@ class TestHealth:
     def test_reports_absent_hardware_as_absent(self, client):
         capabilities = client.get("/api/health").json()["capabilities"]
         assert capabilities["motors"] is False  # no gpiozero on a laptop
-        assert capabilities["detector"] is False  # no model ships yet
+        # The detector depends on whether an exported model is present, which
+        # differs between a fresh clone and a machine that has run the export.
+        # Asserting either way would make this test fail for one of them.
+        assert isinstance(capabilities["detector"], bool)
 
 
 class TestStop:

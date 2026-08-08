@@ -50,6 +50,27 @@ Run this once to set the Pi up, and again whenever the code changes. It needs
 ssh access to the Pi and the Pi's apt packages: see
 [docs/HARDWARE.md](docs/HARDWARE.md).
 
+### The defect model
+
+The robot runs the model as an ONNX graph. Producing that graph needs PyTorch,
+running it does not, so the export happens **on your computer** and only the
+result crosses to the Pi. Do this once per trained checkpoint:
+
+```bash
+python3 -m venv /tmp/export
+/tmp/export/bin/pip install rfdetr onnx onnxruntime
+/tmp/export/bin/python server/deploy/export-model.py ~/Downloads/checkpoint_best_total.pth
+```
+
+That writes `server/model/pipe-defects.onnx`. After it exists, `./deploy.sh`
+installs it with everything else — nothing extra to run. The deploy prints
+whether the model loaded on the robot, so a missing one is caught then rather
+than mid-inspection.
+
+Without it the robot still drives, records and logs defects by hand; it just
+detects nothing. See [MODEL.md](MODEL.md) for the class list and for how to
+time inference on the Pi.
+
 ### If coming from a newly flashed SD card
 
 If you just reflashed your microSD card, complete the setup steps below before continuing; otherwise, skip directly to step 3. Make sure you have ran the deploy command first.
@@ -110,6 +131,31 @@ cd web
 npm install
 npm run dev        # http://localhost:5173
 ```
+
+Press **T twice** on any screen to boot a simulated robot in the browser — four
+seeded runs, working telemetry, no hardware. Press **T then E** to step through
+every error message, and **T then C** / **T then M** to inject an air spike or a
+detection.
+
+### Run the model on your computer
+
+The simulator fakes telemetry but not the model. To see real detections without
+a Pi, run the actual server locally — it loads the same ONNX graph the robot
+would:
+
+```bash
+cd server
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m pipepatrol        # http://localhost:8000
+```
+
+Then open the console at `http://localhost:5173`, and enter `localhost:8000` as
+the robot address. Press **D twice** for demo day mode, load a pipe video or
+some stills, and the frames go to your machine's copy of the model exactly as
+they would go to the robot's.
+
+Your laptop has no camera on a pipe and no motors, so the live feed and driving
+are unavailable — this is for exercising the model and the detection UI.
 
 ### Tests
 

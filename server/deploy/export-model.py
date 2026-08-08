@@ -55,8 +55,8 @@ def main():
     parser.add_argument(
         "--resolution",
         type=int,
-        default=560,
-        help="square input size. Must be a multiple of 56 for this backbone.",
+        default=576,
+        help="square input size. Must be a multiple of 32 for this backbone.",
     )
     args = parser.parse_args()
 
@@ -64,7 +64,7 @@ def main():
         sys.exit(f"no such checkpoint: {args.checkpoint}")
 
     try:
-        from rfdetr import RFDETRBase
+        from rfdetr import RFDETRMedium
     except ImportError:
         sys.exit(
             "rfdetr is not installed. This script runs on a laptop:\n"
@@ -75,12 +75,16 @@ def main():
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
-    # The checkpoint is a DINOv2 ViT-S/16 backbone with a 256-wide decoder and a
-    # nine-way classifier -- RF-DETR Base. Loading through the package rather
-    # than rebuilding the architecture by hand means the export follows whatever
-    # the training code actually did.
+    # WHICH VARIANT, AND HOW WE KNOW. The checkpoint carries no architecture
+    # field, so it was read off the weights themselves: a DINOv2 ViT-S backbone
+    # with 12 layers at patch size 16, a 256-wide decoder with FOUR layers.
+    # Patch 16 rules out Base (which is 14 in current rfdetr), and four decoder
+    # layers distinguishes Medium from Small (3) and Nano (2). Getting this
+    # wrong does not fail quietly -- the loader refuses on a shape mismatch --
+    # but it is worth writing down, because "Base" is the obvious guess and it
+    # is the wrong one.
     print(f"loading {args.checkpoint} ...")
-    model = RFDETRBase(
+    model = RFDETRMedium(
         pretrain_weights=str(args.checkpoint),
         num_classes=len(CLASS_NAMES) + 1,
         resolution=args.resolution,
