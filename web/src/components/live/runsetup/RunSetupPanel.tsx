@@ -154,7 +154,7 @@ export function RunSetupPanel({
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder={format.timestamp(createdAt)}
-              className="h-9 rounded-panel border border-ink-800 bg-white/5 px-3 text-[13px] text-ink-100 placeholder:text-ink-500 focus:border-white/35 focus:outline-none"
+              className="h-9 rounded-panel border border-ink-800 bg-white/5 px-3 text-[13px] text-ink-100 placeholder:text-ink-500 focus:border-white/20 focus:outline-none"
             />
           </label>
           <div className="mt-3 flex items-baseline justify-between gap-3">
@@ -214,7 +214,7 @@ export function RunSetupPanel({
 
       <footer className="border-t border-ink-700 px-4 py-3">
         {failed.length > 0 && (
-          <div className="mb-2.5 flex gap-2.5 rounded-panel border border-state-fault-signal/45 bg-state-fault-signal/10 px-3 py-2.5">
+          <div className="mb-2.5 flex gap-2.5 rounded-panel border border-state-fault-signal/20 bg-state-fault-signal/10 px-3 py-2.5">
             <span className="mt-px shrink-0 text-state-fault-signal" aria-hidden>
               <WarningCircle size={16} weight={phosphorWeight(16)} />
             </span>

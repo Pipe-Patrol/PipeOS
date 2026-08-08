@@ -20,9 +20,10 @@ import { useReturnHome } from '@/robot/ReturnHomeProvider'
  * be the most dangerous sentence on the console: an operator who believes the
  * robot is coming out by itself is an operator who stops driving it.
  *
- * It sits under the telemetry readout in the same centre column, because it is
- * about the run rather than about a fault — AlertBanner keeps its own line for
- * things that are broken.
+ * It sits under the telemetry readout in the same centre column, and it is the
+ * only thing left on the glass that looks like a message. That is deliberate:
+ * it is a decision about the run rather than something that has gone wrong, and
+ * everything that has gone wrong lives in the notice bar above the status bar.
  */
 export function ReturnHomeBanner() {
   const { budget, mode, advising, engage, cancel, dismiss } = useReturnHome()
@@ -63,7 +64,7 @@ export function ReturnHomeBanner() {
   return (
     <div
       role="alert"
-      className="pointer-events-auto flex items-center gap-3 rounded-panel border border-state-warning-signal/60 bg-state-warning-surface/40 px-3 py-1.5 text-[12px] backdrop-blur-sm"
+      className="pointer-events-auto flex items-center gap-3 rounded-panel border border-state-warning-signal/28 bg-state-warning-surface/40 px-3 py-1.5 text-[12px] backdrop-blur-sm"
     >
       <span className="text-state-warning-signal">
         Charge is close to the return reserve —{' '}

@@ -44,7 +44,13 @@ class Robot:
         self.hazards = Hazards(self.drive, self.imu, self.flow)
 
         self.store = store or RunStore()
-        self.recorder = Recorder(self.camera, self.store)
+        self.recorder = Recorder(
+            self.camera,
+            self.store,
+            # Stamps each clip with the stretch of pipe it covers, which is what
+            # lets the longitudinal view draw where a recording was taken.
+            chainage=lambda: self.odometry.status()["chainage_m"],
+        )
         self.detections = DetectionService(
             self.camera, chainage_source=lambda: self.odometry.status()["chainage_m"]
         )

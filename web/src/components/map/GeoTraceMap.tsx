@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import L from 'leaflet'
 
 import { project, projectPath, type Origin } from '@/components/map/geo'
@@ -9,6 +9,7 @@ import {
   positionMarker,
   useLeaflet,
 } from '@/components/map/useLeaflet'
+import { RecentreIcon } from '@/components/primitives/icons'
 import * as format from '@/lib/format'
 import type { TrailPoint } from '@/robot/useLiveTrail'
 
@@ -28,7 +29,16 @@ interface GeoTraceMapProps {
    * inside one, and every pixel of chrome is a pixel of street not shown.
    */
   bare?: boolean
-  /** Controls floated over the map — the return-home button on the live screen. */
+  /**
+   * Makes the H the return-home button. Only the driving screen passes this;
+   * everywhere else the entry point is a mark and nothing more.
+   */
+  home?: {
+    returning: boolean
+    label: string
+    onToggle: () => void
+  }
+  /** Anything else floated over the map. */
   children?: ReactNode
 }
 
@@ -57,6 +67,7 @@ export function GeoTraceMap({
   interactive = true,
   keyboard = interactive,
   bare = false,
+  home,
   children,
 }: GeoTraceMapProps) {
   const { containerRef, map, tiles } = useLeaflet({
@@ -65,12 +76,19 @@ export function GeoTraceMap({
     keyboard,
   })
 
-  // True once the operator has moved the view themselves. From that moment the
-  // map stops reframing itself: a view that snapped back to the whole run every
-  // time the robot logged a path point would be a view nobody could hold still
-  // long enough to read a street name off. It is a state they can get out of —
-  // see the recentre control — rather than one they are stuck in.
-  const [manual, setManual] = useState(false)
+  /**
+   * Who is driving the view.
+   *
+   *   fit     the default: frame the whole run, entry point included, and
+   *           refit as it grows
+   *   manual  the operator has dragged or zoomed. Nothing moves the view again
+   *           until they ask — a view that snapped back to the whole run every
+   *           time the robot logged a path point is one nobody can hold still
+   *           long enough to read a street name off
+   *   follow  what recentre leaves behind: the robot stays in the middle at
+   *           whatever zoom the operator chose
+   */
+  const [view, setView] = useState<'fit' | 'manual' | 'follow'>('fit')
 
   // As [lat, lon] tuples: Leaflet's own LatLngLiteral spells it `lng`, and
   // converting once here beats spelling it both ways everywhere below.
@@ -93,6 +111,28 @@ export function GeoTraceMap({
   const lineRef = useRef<L.Polyline | null>(null)
   const noseRef = useRef<L.Marker | null>(null)
 
+  /**
+   * Put the robot in the middle of the frame.
+   *
+   * It used to just clear the manual flag and let the refit effect run, which
+   * did something quite different: fitBounds frames the whole run, so on a long
+   * one the robot ended up wherever in the box it happened to be — often at the
+   * very edge — and on a short one the view jumped out to a scale nobody asked
+   * for. Recentre means centre, so this pans to the robot and leaves the zoom
+   * exactly where the operator had set it.
+   *
+   * It leaves the map in `follow` rather than back in `fit`, so the robot stays
+   * in the middle from then on instead of the view springing out to the whole
+   * run on the next path point.
+   */
+  const recentre = useCallback(() => {
+    if (map) {
+      const target = nose ?? (track.length > 0 ? track[track.length - 1] : null)
+      if (target) map.setView(target, map.getZoom(), { animate: false })
+    }
+    setView('follow')
+  }, [map, nose, track])
+
   // What counts as "the operator moved it" is read off the DOM rather than off
   // Leaflet's own move events, because Leaflet fires those for our own
   // fitBounds too — the map would declare itself manually driven the first time
@@ -101,7 +141,7 @@ export function GeoTraceMap({
     const container = containerRef.current
     if (!container || !interactive) return
 
-    const touched = () => setManual(true)
+    const touched = () => setView('manual')
     container.addEventListener('pointerdown', touched)
     container.addEventListener('wheel', touched, { passive: true })
     return () => {
@@ -113,13 +153,31 @@ export function GeoTraceMap({
   // Where the operator said the robot went in. Drawn once, and drawn even
   // before there is any track: it is the one point on here that is not an
   // estimate, and the one an operator looks for to answer "how do I get out".
+  // The click handler is read through a ref so that engaging a return does not
+  // tear the marker down and rebuild it — Leaflet would drop the click that
+  // caused it, and the button would need pressing twice.
+  const homeRef = useRef(home)
+  useEffect(() => {
+    homeRef.current = home
+  })
+
+  // Pulled out of the dependency array: `home` is a new object every render, so
+  // only the three values that actually change the badge's markup are watched.
+  const homeInteractive = home !== undefined
+  const homeReturning = home?.returning ?? false
+  const homeLabel = home?.label
+
   useEffect(() => {
     if (!map) return
-    const marker = homeMarker([origin.lat, origin.lon]).addTo(map)
+    const marker = homeMarker([origin.lat, origin.lon], {
+      onClick: homeInteractive ? () => homeRef.current?.onToggle() : undefined,
+      returning: homeReturning,
+      title: homeLabel,
+    }).addTo(map)
     return () => {
       marker.remove()
     }
-  }, [map, origin.lat, origin.lon])
+  }, [map, origin.lat, origin.lon, homeInteractive, homeReturning, homeLabel])
 
   // The track, refitted when it grows. Only ever on new stored points, so the
   // view holds still while the robot crawls between two of them.
@@ -153,12 +211,12 @@ export function GeoTraceMap({
     // is a bounds a few metres across, which Leaflet answers by zooming past
     // where OpenStreetMap has tiles — a blank grey square where the street
     // should be.
-    if (manual) return
+    if (view !== 'fit') return
     map.fitBounds(
       L.latLngBounds([[origin.lat, origin.lon], ...track]).pad(0.3),
       { animate: false, maxZoom: DEFAULT_ZOOM },
     )
-  }, [map, track, origin.lat, origin.lon, manual])
+  }, [map, track, origin.lat, origin.lon, view])
 
   // The live head, moved rather than rebuilt. It updates ten times a second, so
   // it must not touch the view — except to follow the robot off the edge, which
@@ -174,13 +232,17 @@ export function GeoTraceMap({
     } else {
       noseRef.current = positionMarker(nose).addTo(map)
     }
-    // Following the robot off the edge is part of framing the run, so it stops
-    // when the operator takes the view over — otherwise a map dragged one
-    // street across would be yanked back the moment the robot moved.
-    if (!manual && !map.getBounds().contains(nose)) {
+
+    // `follow` holds the robot in the middle — that is what recentre promised,
+    // and letting it drift to the edge until it fell off would be a slower
+    // version of not centring at all. `fit` only chases it off the edge, so the
+    // scale holds still underneath. `manual` never moves the view.
+    if (view === 'follow') {
+      map.panTo(nose, { animate: false })
+    } else if (view === 'fit' && !map.getBounds().contains(nose)) {
       map.panTo(nose, { animate: false })
     }
-  }, [map, nose, manual])
+  }, [map, nose, view])
 
   // The map instance is torn down with the component, but the markers outlive
   // a `head` going null, so they need releasing by hand.
@@ -203,14 +265,15 @@ export function GeoTraceMap({
 
       {/* Only once there is something to undo. A permanent recentre button
           would be a control that does nothing for the whole of most runs. */}
-      {manual && (
+      {view === 'manual' && (
         <button
           type="button"
-          onClick={() => setManual(false)}
-          className="panel absolute top-2 right-2 z-[800] flex h-7 items-center rounded-panel px-2 text-[11px] text-ink-200 transition-colors hover:bg-white/10"
-          title="Frame the whole run again, and follow the robot"
+          onClick={recentre}
+          className="panel absolute top-2 right-2 z-[800] flex size-7 items-center justify-center rounded-panel text-ink-200 transition-colors hover:bg-white/10 hover:text-ink-0"
+          title="Put the robot back in the middle"
+          aria-label="Recentre on the robot"
         >
-          Recentre
+          <RecentreIcon size={15} />
         </button>
       )}
 

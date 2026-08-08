@@ -212,7 +212,7 @@ function Field({
         value={value}
         inputMode="decimal"
         onChange={(event) => onChange(event.target.value)}
-        className="h-8 w-full rounded-panel border border-ink-800 bg-white/5 px-2 text-[12px] tnum text-ink-100 placeholder:text-ink-500 focus:border-white/35 focus:outline-none"
+        className="h-8 w-full rounded-panel border border-ink-800 bg-white/5 px-2 text-[12px] tnum text-ink-100 placeholder:text-ink-500 focus:border-white/20 focus:outline-none"
       />
     </label>
   )

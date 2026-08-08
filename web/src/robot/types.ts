@@ -80,6 +80,12 @@ export interface Motion {
    * fitted. See estimation/odometry.py.
    */
   source: 'inertial' | 'inertial+flow' | 'fused' | 'duty' | 'stopped'
+  /**
+   * The features the visual estimate is following, normalised to the frame.
+   * Absent when nothing is tracked or OpenCV is not installed. Settings draws
+   * these so an operator can see whether the distance has anything behind it.
+   */
+  flow_points?: [number, number][] | null
   /** Wheels turning, picture not. */
   slipping: boolean
   calibrated: boolean
@@ -310,6 +316,20 @@ export interface Snapshot {
   file: string
 }
 
+export interface Recording {
+  id: string
+  file: string
+  index_file: string
+  frames: number
+  bytes: number
+  started_at: number
+  ended_at: number | null
+  duration_s: number
+  /** The stretch of pipe this clip covers. Null when odometry had nothing. */
+  chainage_start_m: number | null
+  chainage_end_m: number | null
+}
+
 export interface PathPoint {
   chainage_m: number
   x: number
@@ -326,6 +346,10 @@ export interface Run extends Omit<
   note: string
   defects: Defect[]
   snapshots: Snapshot[]
-  recording: { file: string; index_file: string; frames: number; bytes: number } | null
+  /**
+   * Every clip taken on the run, in order. A run holds any number of them —
+   * the operator stops and starts as they work.
+   */
+  recordings: Recording[]
   path: PathPoint[]
 }

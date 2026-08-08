@@ -32,13 +32,14 @@ def build(robot):
     climate = robot.climate.status()
     odometry = robot.odometry.status()
     hazards = robot.hazards.status()
+    flow = robot.flow.status()
 
     return {
         "type": "telemetry",
         "at": round(time.time(), 3),
         "drive": drive,
         "orientation": _orientation(imu),
-        "motion": _motion(odometry, imu),
+        "motion": _motion(odometry, imu, flow),
         "power": _power(robot),
         "camera": camera,
         "lights": lights,
@@ -47,7 +48,7 @@ def build(robot):
         "hazards": hazards,
         "detections": [d.as_dict() for d in robot.detections.active()],
         "perception": robot.detections.status(),
-        "flow": robot.flow.status(),
+        "flow": flow,
         "run": robot.run_status(),
         "recording": robot.recorder.status(),
         "alert": _alert(drive, hazards, camera, host),
@@ -94,11 +95,17 @@ def _orientation(imu):
     }
 
 
-def _motion(odometry, imu):
-    """Distance and speed, both estimated. The tier is in the payload, not a comment."""
+def _motion(odometry, imu, flow):
+    """Distance and speed, both estimated. The tier is in the payload, not a comment.
+
+    The tracked features ride along because distance is measured off the picture
+    and an operator has no other way to tell a confident estimate from one the
+    camera has stopped supporting -- the number keeps updating either way.
+    """
     return {
         **odometry,
         "accel_m_s2": imu["accel_m_s2"],
+        "flow_points": flow.get("points") or None,
     }
 
 

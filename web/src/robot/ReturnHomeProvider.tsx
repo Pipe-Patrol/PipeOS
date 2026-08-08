@@ -49,6 +49,10 @@ const IDLE: RthBudget = {
   charge_pct: null,
   state: 'unknown',
   note: null,
+  used_m: 0,
+  used_pct: null,
+  left_m: null,
+  left_pct: null,
 }
 
 const ReturnHomeContext = createContext<ReturnHomeValue | null>(null)

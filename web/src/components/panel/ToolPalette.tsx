@@ -1,11 +1,12 @@
 import { useEffect, type CSSProperties } from 'react'
 
-import { DefectPanel } from '@/components/panel/DefectPanel'
+import { DefectPanel, type DefectPrefill } from '@/components/panel/DefectPanel'
 import { GalleryPanel } from '@/components/panel/GalleryPanel'
 import { LightsPanel } from '@/components/panel/LightsPanel'
 import { TuningPanel } from '@/components/panel/TuningPanel'
 import { ToolButton } from '@/components/panel/ToolButton'
 import {
+  AutoIcon,
   DefectIcon,
   GalleryIcon,
   LightIcon,
@@ -39,7 +40,15 @@ interface ToolPaletteProps {
   defectRegion: DefectRegion | null
   defectRegionMarkedAt: number
   onDefectRegionChange: (region: DefectRegion | null) => void
-  onDrawDefectRegion: () => void
+  onDrawDefectRegion: (className: string, label: string) => void
+  /** Autonomous flagging, driven by the model and the air sensor. */
+  autoMode: boolean
+  onAutoMode: (on: boolean) => void
+  /** True while the air is doing something sudden. */
+  spiking: boolean
+  /** Prefilled note when a flag was started from an air spike. */
+  prefill: DefectPrefill | null
+  onPrefillUsed: () => void
 }
 
 /**
@@ -65,6 +74,11 @@ export function ToolPalette({
   defectRegionMarkedAt,
   onDefectRegionChange,
   onDrawDefectRegion,
+  autoMode,
+  onAutoMode,
+  spiking,
+  prefill,
+  onPrefillUsed,
 }: ToolPaletteProps) {
   const toggle = (panel: PanelId) => onOpen(open === panel ? null : panel)
   const recording = telemetry.recording.active
@@ -93,6 +107,9 @@ export function ToolPalette({
           break
         case 'r':
           onToggleRecording()
+          break
+        case 'a':
+          onAutoMode(!autoMode)
           break
         default:
           break
@@ -140,6 +157,20 @@ export function ToolPalette({
         <ToolButton label="Camera roll" hint="G" onClick={() => toggle('gallery')}>
           <GalleryIcon size={20} weight={0.9} />
         </ToolButton>
+
+        <span className="my-0.5 h-px w-7 self-center bg-ink-800" />
+
+        {/* Below the divider with nothing else, because it is the one control
+            here that keeps acting after it is let go. */}
+        <ToolButton
+          label={autoMode ? 'Auto flagging on' : 'Auto flagging'}
+          hint="A"
+          active={autoMode}
+          onClick={() => onAutoMode(!autoMode)}
+          disabled={!run}
+        >
+          <AutoIcon size={20} weight={0.9} />
+        </ToolButton>
       </div>
 
       {open === 'lights' && (
@@ -173,6 +204,9 @@ export function ToolPalette({
           run={run}
           motion={telemetry.motion}
           climate={telemetry.climate}
+          spiking={spiking}
+          prefill={prefill}
+          onPrefillUsed={onPrefillUsed}
           region={defectRegion}
           regionMarkedAt={defectRegionMarkedAt}
           onRegionChange={onDefectRegionChange}

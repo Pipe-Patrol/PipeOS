@@ -30,6 +30,7 @@ import json
 import logging
 import shutil
 import subprocess
+import threading
 
 log = logging.getLogger(__name__)
 
@@ -71,13 +72,22 @@ def recorded_fps(index_path, default=DEFAULT_FPS):
     return (len(index) - 1) / span
 
 
-def _command(video_path, fps):
+def _command(video_paths, fps):
+    """One ffmpeg invocation for however many clips the run holds.
+
+    JOINED BY CONCATENATING THE INPUT, not with ffmpeg's concat demuxer. Raw
+    MJPEG is just JPEGs end to end, so two clips appended byte-for-byte are a
+    valid MJPEG stream of both -- the format has no header or index to merge.
+    That means one `-i` reading a pipe we feed, rather than a temporary list
+    file on a card we are trying not to write to.
+    """
+    del video_paths  # fed on stdin; see _feed
     return [
         FFMPEG,
         "-loglevel", "error",
         "-f", "mjpeg",
         "-framerate", f"{fps:.3f}",
-        "-i", str(video_path),
+        "-i", "pipe:0",
         "-c:v", "copy",
         # Fragmented, so the file is valid from the first bytes out. A normal
         # MOV puts its index at the end, which cannot be written until the whole
@@ -88,13 +98,34 @@ def _command(video_path, fps):
     ]
 
 
-def remux(video_path, fps):
-    """Yield a playable MOV of the recording, as ffmpeg produces it."""
+def remux(video_paths, fps):
+    """Yield one playable MOV covering every clip, in order.
+
+    `video_paths` may be a single path or a list of them. A run can hold several
+    recordings -- the operator stops and starts as they work -- and what they
+    want out of it is the run, not the last clip of it.
+    """
+    if not isinstance(video_paths, (list, tuple)):
+        video_paths = [video_paths]
+    paths = [path for path in video_paths if path.is_file()]
+    if not paths:
+        return
+
     process = subprocess.Popen(
-        _command(video_path, fps),
+        _command(paths, fps),
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+
+    # Fed from a thread: ffmpeg will not drain stdin while nothing is reading
+    # its stdout, so writing the clips inline here would deadlock on the first
+    # pipe buffer that fills.
+    feeder = threading.Thread(
+        target=_feed, args=(process, paths), name="remux-feed", daemon=True
+    )
+    feeder.start()
+
     try:
         while True:
             chunk = process.stdout.read(CHUNK_BYTES)
@@ -114,5 +145,23 @@ def remux(video_path, fps):
         for pipe in (process.stdout, process.stderr):
             if pipe is not None:
                 pipe.close()
+        feeder.join(timeout=5)
         if process.returncode not in (0, None) and process.returncode > 0:
-            log.warning("ffmpeg exited %s converting %s", process.returncode, video_path)
+            log.warning("ffmpeg exited %s converting %s", process.returncode, paths)
+
+
+def _feed(process, paths):
+    """Write every clip into ffmpeg's stdin, in order, then close it."""
+    try:
+        for path in paths:
+            with path.open("rb") as clip:
+                shutil.copyfileobj(clip, process.stdin, CHUNK_BYTES)
+    except (BrokenPipeError, OSError):
+        # The client hung up, or ffmpeg died. Either way there is nothing to
+        # write to and nothing useful to say about it.
+        pass
+    finally:
+        try:
+            process.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass

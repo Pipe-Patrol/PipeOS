@@ -109,7 +109,7 @@ export function DetectionSettings({ value, onChange }: DetectionSettingsProps) {
                   onClick={() => set('mode', mode.value)}
                   className={`h-8 flex-1 rounded-panel border text-[12px] transition-colors ${
                     value.mode === mode.value
-                      ? 'border-white/35 bg-white/12 text-ink-0'
+                      ? 'border-white/20 bg-white/12 text-ink-0'
                       : 'border-ink-800 text-ink-400 hover:bg-white/6 hover:text-ink-100'
                   }`}
                 >
@@ -188,7 +188,7 @@ export function DetectionSettings({ value, onChange }: DetectionSettingsProps) {
                           onClick={() => toggleClass(type.code)}
                           className={`h-7 rounded-[6px] border px-2 text-[11.5px] transition-colors ${
                             on
-                              ? 'border-white/30 bg-white/12 text-ink-100'
+                              ? 'border-white/20 bg-white/12 text-ink-100'
                               : 'border-ink-800 text-ink-600 hover:text-ink-300'
                           }`}
                         >

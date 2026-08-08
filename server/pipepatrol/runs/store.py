@@ -136,6 +136,16 @@ class RunStore:
             self._write(run)
             return defect
 
+    def add_recording(self, run_id, recording):
+        """Append a finished clip. Runs may hold any number of them."""
+        with self._lock:
+            run = self._read(run_id)
+            if run is None:
+                return None
+            run.recordings.append(recording)
+            self._write(run)
+            return recording
+
     def delete_defect(self, run_id, defect_id):
         with self._lock:
             run = self._read(run_id)

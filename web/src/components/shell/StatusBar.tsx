@@ -3,6 +3,7 @@ import { SignalBars, strengthFromQuality } from '@/components/primitives/SignalB
 import { StatusBarCell } from '@/components/shell/StatusBarCell'
 import { RUN_STATE_PRESENTATION, runStateOf } from '@/constants/run-state'
 import * as format from '@/lib/format'
+import { useNotices, worstLevel } from '@/lib/notices'
 import { useTempUnit } from '@/lib/units'
 import { useRobot } from '@/robot/RobotProvider'
 
@@ -21,8 +22,9 @@ const VALUE = 'tnum text-[14px] leading-[16px] font-semibold'
 export function StatusBar() {
   const { telemetry, link, health } = useRobot()
   const [unit] = useTempUnit()
+  const notices = useNotices()
 
-  const presentation = RUN_STATE_PRESENTATION[runStateOf(telemetry)]
+  const presentation = RUN_STATE_PRESENTATION[runStateOf(telemetry, worstLevel(notices))]
   const runName = telemetry?.run.name ?? null
 
   return (

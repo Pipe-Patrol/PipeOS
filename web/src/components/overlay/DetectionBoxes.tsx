@@ -1,3 +1,5 @@
+import { DefectBox } from '@/components/overlay/DefectBox'
+import { detectionColor, useDetectionColors } from '@/lib/detectionColors'
 import type { Detection } from '@/robot/types'
 
 /** Detections older than this have faded out entirely. Matches DETECTION_TTL_S. */
@@ -12,13 +14,13 @@ const TTL_S = 6
  *    the robot has moved by the time a box arrives, so each one fades with age
  *    rather than sitting crisply over a frame it does not describe.
  *
- * 2. Invent a box. Most classifiers here have no localisation head, so `box` is
- *    null far more often than not. Those are listed, not drawn — a box in the
- *    middle of the frame because we had nowhere else to put it is a lie about
- *    where the defect is.
+ * 2. Invent a box. A detection can arrive without localisation, and those are
+ *    listed rather than drawn — a box in the middle of the frame because we had
+ *    nowhere else to put it is a lie about where the defect is.
  *
- * No model ships yet, so today this renders nothing. It is wired so that
- * landing one is a server change alone.
+ * Colour and label come from DefectBox, which is the same component the defect
+ * panel and the finished-run views draw with, so a class means the same colour
+ * everywhere in the app.
  */
 interface DetectionBoxesProps {
   detections: Detection[]
@@ -30,9 +32,15 @@ interface DetectionBoxesProps {
    * ends of the subtraction have to come from the same clock.
    */
   now: number
+  /** Press a box to file it. Omitted when there is no run to file into. */
+  onFlag?: (detection: Detection) => void
 }
 
-export function DetectionBoxes({ detections, now }: DetectionBoxesProps) {
+export function DetectionBoxes({ detections, now, onFlag }: DetectionBoxesProps) {
+  // Subscribed rather than read, so recolouring a class in settings repaints
+  // the boxes already on screen instead of waiting for the next detection.
+  useDetectionColors()
+
   if (detections.length === 0) return null
 
   const localised = detections.filter((detection) => detection.box !== null)
@@ -42,23 +50,15 @@ export function DetectionBoxes({ detections, now }: DetectionBoxesProps) {
     <div className="pointer-events-none absolute inset-0">
       {localised.map((detection) => {
         const [x1, y1, x2, y2] = detection.box!
-        const age = now - detection.at
         return (
-          <div
+          <DefectBox
             key={detection.id}
-            className="absolute border border-state-warning-signal"
-            style={{
-              left: `${x1 * 100}%`,
-              top: `${y1 * 100}%`,
-              width: `${(x2 - x1) * 100}%`,
-              height: `${(y2 - y1) * 100}%`,
-              opacity: fade(age),
-            }}
-          >
-            <span className="overlay-shadow absolute -top-5 left-0 bg-state-warning-signal/20 px-1 text-[10px] tracking-[0.06em] text-state-warning-signal uppercase">
-              {detection.label} {Math.round(detection.confidence * 100)}%
-            </span>
-          </div>
+            rect={{ x: x1, y: y1, w: x2 - x1, h: y2 - y1 }}
+            label={detection.label}
+            confidence={detection.confidence}
+            opacity={fade(now - detection.at)}
+            onFlag={onFlag ? () => onFlag(detection) : undefined}
+          />
         )
       })}
 
@@ -67,8 +67,11 @@ export function DetectionBoxes({ detections, now }: DetectionBoxesProps) {
           {unlocalised.map((detection) => (
             <li
               key={detection.id}
-              className="overlay-shadow text-[11px] tracking-[0.06em] text-state-warning-signal uppercase"
-              style={{ opacity: fade(now - detection.at) }}
+              className="overlay-shadow text-[11px] font-semibold tracking-[0.06em] uppercase"
+              style={{
+                color: detectionColor(detection.label),
+                opacity: fade(now - detection.at),
+              }}
               title="Classified, but not localised — no box available"
             >
               {detection.label} {Math.round(detection.confidence * 100)}%

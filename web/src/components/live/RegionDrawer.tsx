@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
 
+import { DefectBox } from '@/components/overlay/DefectBox'
 import type { DefectRegion } from '@/robot/types'
 
 /** The camera's own aspect. 640x480, and 180° of rotation does not change it. */
@@ -28,6 +29,9 @@ function coveredFrame(width: number, height: number) {
 }
 
 interface RegionDrawerProps {
+  /** The class currently chosen in the panel, so the box is drawn in its colour. */
+  className: string | null
+  label: string
   onCommit: (region: DefectRegion) => void
   onCancel: () => void
 }
@@ -44,7 +48,12 @@ interface RegionDrawerProps {
  * region means the same thing to the panel preview, to the saved defect, and to
  * anything later drawn over a recording.
  */
-export function RegionDrawer({ onCommit, onCancel }: RegionDrawerProps) {
+export function RegionDrawer({
+  className,
+  label,
+  onCommit,
+  onCancel,
+}: RegionDrawerProps) {
   const ref = useRef<HTMLDivElement>(null)
   const startRef = useRef<{ x: number; y: number } | null>(null)
   const [box, setBox] = useState<DefectRegion | null>(null)
@@ -131,14 +140,13 @@ export function RegionDrawer({ onCommit, onCancel }: RegionDrawerProps) {
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
         <div className="relative aspect-[4/3] min-h-full min-w-full">
           {box && (
-            <div
-              className="absolute border-2 border-state-fault-signal"
-              style={{
-                left: `${box.x * 100}%`,
-                top: `${box.y * 100}%`,
-                width: `${box.w * 100}%`,
-                height: `${box.h * 100}%`,
-              }}
+            <DefectBox
+              rect={box}
+              label={className ?? label}
+              // The confidence of a box an operator drew themselves is not a
+              // number, and a percentage next to it would imply the model had
+              // an opinion about something it never saw.
+              confidence={null}
             />
           )}
         </div>

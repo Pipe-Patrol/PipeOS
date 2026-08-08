@@ -5,6 +5,12 @@ import type { Telemetry } from '@/robot/types'
 
 interface TelemetryOverlayProps {
   telemetry: Telemetry
+  /**
+   * Channels whose reading has just jumped. Those go red — the numbers are in
+   * the corner of the eye and drifting slowly is what they always do, so a step
+   * change has to announce itself where the operator is already looking.
+   */
+  spiking?: { temperature: boolean; humidity: boolean }
 }
 
 /**
@@ -35,7 +41,10 @@ interface TelemetryOverlayProps {
  * inside the sensor's noise floor (hardware/imu.py), so a still robot shows a
  * still number instead of jitter.
  */
-export function TelemetryOverlay({ telemetry }: TelemetryOverlayProps) {
+export function TelemetryOverlay({
+  telemetry,
+  spiking = { temperature: false, humidity: false },
+}: TelemetryOverlayProps) {
   const { motion, drive, climate } = telemetry
   const [unit] = useTempUnit()
 
@@ -58,6 +67,7 @@ export function TelemetryOverlay({ telemetry }: TelemetryOverlayProps) {
             label="Air"
             value={format.temperature(climate.temperature_c, unit)}
             quality={climate.quality}
+            state={spiking.temperature ? 'bad' : 'normal'}
           />
         </div>
 
@@ -66,6 +76,7 @@ export function TelemetryOverlay({ telemetry }: TelemetryOverlayProps) {
             label="Humidity"
             value={format.percent(climate.humidity_pct)}
             quality={climate.quality}
+            state={spiking.humidity ? 'bad' : 'normal'}
           />
         </div>
       </div>

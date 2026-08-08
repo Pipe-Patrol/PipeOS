@@ -22,6 +22,18 @@ interface PopoverProps {
  * important than another by size alone. Fixed rather than absolute so it escapes
  * the sidebar's narrow column, and deliberately not a modal: it does not trap
  * focus and it does not cover the video.
+ *
+ * TWO GLOBAL RULES LIVE HERE, so that adding a panel cannot break either.
+ *
+ * Height is capped to the camera feed (`--feed-h`, published by useFeedBounds),
+ * never to the viewport. A panel taller than the feed is covering the status
+ * bar or the longitudinal strip, and it only happens on a short window — the
+ * case nobody checks before a demo. The viewport fallback is for the screens
+ * that have no feed to measure.
+ *
+ * Panels are the top layer, above every overlay on the video. They are the only
+ * things on screen an operator has deliberately opened, and something that was
+ * asked for outranks something that merely appeared.
  */
 export function Popover({
   title,
@@ -56,7 +68,7 @@ export function Popover({
   return (
     <div
       ref={ref}
-      className="panel fixed top-1/2 right-[84px] z-30 flex max-h-[calc(100dvh_-_2rem)] w-72 -translate-y-1/2 flex-col overflow-hidden"
+      className="panel fixed top-1/2 right-[84px] z-50 flex max-h-[var(--feed-h,calc(100dvh_-_2rem))] w-72 -translate-y-1/2 flex-col overflow-hidden"
     >
       <header className="flex items-center justify-between border-b border-ink-800 px-3 py-2">
         <h2 className="display text-[13px]">{title}</h2>

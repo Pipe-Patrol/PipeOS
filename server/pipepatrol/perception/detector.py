@@ -140,6 +140,21 @@ class DetectionService:
 
             self._stop.wait(max(0.0, MIN_INFERENCE_INTERVAL_S - elapsed))
 
+    def infer_once(self, jpeg):
+        """Run the detector against a frame from somewhere other than the camera.
+
+        Used by demo mode, which feeds recorded footage in from the console. It
+        goes straight to the backend rather than through the sampling loop
+        above: there is no video to hold up, and the caller wants the answer for
+        the frame it just sent rather than for whatever the camera saw last.
+        """
+        found = self._detector.infer(jpeg)
+        chainage = self._chainage_source() if self._chainage_source else None
+        for detection in found:
+            if detection.chainage_m is None:
+                detection.chainage_m = chainage
+        return found
+
     def status(self):
         return {
             "backend": self._detector.name,

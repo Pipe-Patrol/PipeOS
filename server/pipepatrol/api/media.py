@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -35,6 +35,64 @@ async def get_camera(robot=Depends(get_robot)):
         media_type=f"multipart/x-mixed-replace; boundary={camera_module.BOUNDARY}",
         headers={"Cache-Control": "no-store", "Age": "0"},
     )
+
+
+@router.get("/api/camera/still")
+async def get_camera_still(robot=Depends(get_robot)):
+    """One frame, as a plain JPEG.
+
+    The stream is the wrong thing to point an <img> at when what is wanted is a
+    picture of a particular moment: it keeps playing, so a "preview" of the
+    frame a defect was filed against quietly becomes a live view of wherever the
+    robot is now. This returns the current frame and then ends, so the browser
+    holds a still.
+
+    Cached hard and deliberately. The console fetches this with the timestamp
+    the operator marked the defect at, and that URL must keep resolving to the
+    same picture for as long as the panel is open.
+    """
+    jpeg = robot.camera.latest_jpeg()
+    if jpeg is None:
+        return JSONResponse({"error": "no frame available"}, status_code=503)
+    return Response(
+        content=jpeg,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=3600, immutable"},
+    )
+
+
+@router.post("/api/detect")
+async def post_detect(request: Request, robot=Depends(get_robot)):
+    """Run the model against a frame the console supplied, rather than the camera.
+
+    This is what makes demo day honest. On demo day the robot is on a table and
+    the camera sees a ceiling, so the console feeds it recorded footage instead
+    -- but the detections still have to be the model's own work rather than
+    something drawn on. The frames come here, the same detector that would have
+    run against the camera runs against them, and what comes back is what it
+    found.
+
+    Synchronous on purpose. The live path is deliberately decoupled from
+    inference because video must never wait on it; here there is no video to
+    hold up and the caller wants the answer for the frame it just sent.
+    """
+    if not robot.detections.available:
+        return JSONResponse(
+            {"error": "no detection model is installed", **robot.detections.status()},
+            status_code=503,
+        )
+
+    jpeg = await request.body()
+    if not jpeg:
+        return JSONResponse({"error": "no frame supplied"}, status_code=400)
+
+    try:
+        found = robot.detections.infer_once(jpeg)
+    except Exception as exc:  # noqa: BLE001 - a model fault must not stop the console
+        log.warning("supplied-frame inference failed: %s", exc)
+        return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
+
+    return {"ok": True, "detections": [d.as_dict() for d in found]}
 
 
 @router.post("/api/camera/tuning")

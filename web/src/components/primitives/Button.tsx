@@ -7,9 +7,17 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode
 }
 
+/**
+ * BORDER TINTS SIT CLOSE TO THEIR FILL. A tinted control is one object, and a
+ * border several steps stronger than the surface behind it reads as two —
+ * an outline with something else inside it. The border is there to define an
+ * edge, not to announce anything, so it runs about ten points of alpha above
+ * the fill and no more. The colour still says warning or fault; the edge does
+ * not have to say it a second time, louder.
+ */
 const VARIANTS: Record<Variant, string> = {
   default:
-    'border-ink-800 bg-white/10 text-ink-100 hover:bg-white/16 active:bg-white/22',
+    'border-white/14 bg-white/10 text-ink-100 hover:bg-white/16 active:bg-white/22',
   /**
    * The one action on a screen that moves the job forward. There is never more
    * than one on show at a time — a second would make the first mean nothing.
@@ -19,7 +27,7 @@ const VARIANTS: Record<Variant, string> = {
   quiet:
     'border-transparent bg-transparent text-ink-400 hover:bg-white/8 hover:text-ink-100',
   danger:
-    'border-state-fault-signal/60 bg-state-fault-signal/15 text-state-fault-signal hover:bg-state-fault-signal/25',
+    'border-state-fault-signal/25 bg-state-fault-signal/15 text-state-fault-signal hover:bg-state-fault-signal/25',
 }
 
 export function Button({ variant = 'default', className = '', ...props }: ButtonProps) {

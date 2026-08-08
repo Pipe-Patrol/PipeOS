@@ -60,14 +60,28 @@ interface ProfileStripProps {
  * ruling nobody can read a distance off.
  */
 const LAYOUT = {
-  height: 52,
+  // Docked height comes straight out of the video, so it is kept to what the
+  // ruling actually needs: the axis, the markers standing on it, and one row of
+  // numbers under it. Everything that was slack has been taken out.
+  height: 40,
   /** The measuring bracket, when two markers are being compared. */
-  bracketY: 5,
+  bracketY: 3,
   /** Where a marker's point lands — the axis. */
-  axisY: 26,
+  axisY: 20,
   /** How far the ruled ticks drop below it. */
-  tickDrop: 4,
+  tickDrop: 3,
 } as const
+
+/**
+ * The axis, drawn to be seen.
+ *
+ * A hairline in ink-700 was the correct weight for a rule on a page and the
+ * wrong one for the spine of the second view of the run: it disappeared against
+ * the panel, and the markers looked like they were floating rather than
+ * standing on something. Two pixels in a light grey is still quiet next to a
+ * defect pin, but it reads as a line at a glance from across a van.
+ */
+const AXIS_HEIGHT = 2
 
 /** The live position's id in a selection. Not a marker, so it cannot collide. */
 const HERE = '__here__'
@@ -177,8 +191,8 @@ export function ProfileStrip({ client, run, chainage_m }: ProfileStripProps) {
             compete with the markers that carry the actual findings. */}
         <span
           aria-hidden
-          className="absolute inset-x-0 h-px bg-ink-700"
-          style={{ top: LAYOUT.axisY }}
+          className="absolute inset-x-0 rounded-full bg-ink-400"
+          style={{ top: LAYOUT.axisY - AXIS_HEIGHT / 2, height: AXIS_HEIGHT }}
         />
 
         {/* The tick at zero is left unlabelled: the H badge stands on it, and

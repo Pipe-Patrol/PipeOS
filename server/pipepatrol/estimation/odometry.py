@@ -12,7 +12,10 @@ they fail differently:
             were told and nothing about whether the robot obeyed. Wrong on every
             slip, and slip is the normal condition in a wet pipe.
 
-  visual    Radial optical flow (estimation/flow.py) scaled into m/s. Sees what
+  visual    Radial optical flow (estimation/flow.py), made metric by the pipe's
+            own diameter rather than by a factor learned off the wheels — so it
+            is free to disagree with them, which is the only reason to have it.
+            Sees what
             actually moved. Scale-ambiguous on its own, and blind when the pipe
             wall is too dark or too smooth to hold a feature.
 
@@ -274,10 +277,8 @@ class Odometry:
         # The camera is the only source that sees what actually moved, so where
         # it is usable it corrects the integrator rather than the other way
         # round. This is what stops the drift compounding over a long run.
-        if sample.valid and self._scale is not None:
-            visual = math.copysign(
-                abs(sample.divergence) * self._scale, sample.divergence
-            )
+        visual = self._visual_speed(sample)
+        if visual is not None:
             ceiling = abs(commanded) * MAX_VISUAL_OVERSHOOT
             if commanded != 0.0 and abs(visual) <= ceiling:
                 velocity += VISUAL_CORRECTION * (visual - velocity)
@@ -287,15 +288,37 @@ class Odometry:
         self._velocity = velocity
         return velocity, source, slipping
 
+    def _visual_speed(self, sample):
+        """Metres per second off the picture alone, or None.
+
+        Two ways to get one, in order of how much they can be trusted:
+
+          1. The pipe's own geometry (estimation/flow.py). Metric with no
+             calibration, and — the point of it — derived without reference to
+             the wheels, so it can contradict them. That is the whole reason a
+             visual estimate exists: slipping wheels move the odometer and not
+             the picture.
+
+          2. The learned scale, from duty. Kept as the fallback for the case
+             the geometry cannot cover: an unknown or badly deformed bore, where
+             the assumed diameter would be a wrong ruler rather than no ruler.
+        """
+        if not sample.valid:
+            return None
+        if sample.speed_m_s is not None:
+            return sample.speed_m_s
+        if self._scale is None:
+            return None
+        return math.copysign(abs(sample.divergence) * self._scale, sample.divergence)
+
     def _fuse(self, commanded, sample):
         """Returns (speed_m_s, source, slipping)."""
         if commanded == 0.0:
             return 0.0, "stopped", False
 
-        if not sample.valid or self._scale is None:
+        visual = self._visual_speed(sample)
+        if visual is None:
             return commanded, "duty", False
-
-        visual = math.copysign(abs(sample.divergence) * self._scale, sample.divergence)
 
         # The wheels bound the chassis. A visual estimate above that is the flow
         # being fooled -- by a hand passing the lens, or the robot being carried.

@@ -38,7 +38,11 @@ export interface DriveInput {
   gamepadId: string | null
   /** True while Shift is holding the throttle open with no key down. */
   locked: boolean
-  /** True once a drive key has been held long enough to be worth a hint. */
+  /**
+   * True once a drive key has been held long enough to be worth a hint, and
+   * only until the operator has actually used the latch. After that they know,
+   * and the "Locked" chip is the whole of what needs saying.
+   */
   lockHint: boolean
 }
 
@@ -55,6 +59,35 @@ const KEY_LOCK = new Set(['ShiftLeft', 'ShiftRight'])
  */
 const LOCK_HINT_DELAY_MS = 2500
 
+/**
+ * The hint teaches one thing, once.
+ *
+ * Shift-to-lock is a keystroke, not a warning: an operator who has used it
+ * knows it, and showing it again every time they hold W for three seconds is
+ * chrome over pipe wall for the rest of the robot's life. Once the latch has
+ * actually been used the hint retires and only the "Locked" chip remains.
+ *
+ * Stored on the device rather than the run, because the thing being remembered
+ * is whether this person has learned the control.
+ */
+const LOCK_LEARNED_KEY = 'pipepatrol.throttleLockLearned'
+
+function lockLearned(): boolean {
+  try {
+    return window.localStorage.getItem(LOCK_LEARNED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function rememberLockLearned(): void {
+  try {
+    window.localStorage.setItem(LOCK_LEARNED_KEY, '1')
+  } catch {
+    // Private browsing. The hint comes back next session, which is harmless.
+  }
+}
+
 export interface DriveInputOptions {
   client: RobotClient | null
   /** False while a modal owns the keyboard, or the link is down. */
@@ -70,6 +103,7 @@ export function useDriveInput({
   const [keys, setKeys] = useState({ forward: false, reverse: false })
   const [locked, setLocked] = useState<DriveDirection>(null)
   const [hintArmed, setHintArmed] = useState(false)
+  const [learned, setLearned] = useState(lockLearned)
   const gamepad = useGamepad()
 
   // What Shift would latch if it were pressed right now. Read inside the key
@@ -97,7 +131,14 @@ export function useDriveInput({
         // Latch what is moving now; press again to let go. Shift with nothing
         // moving does nothing — the lock can only ever extend a command the
         // operator has already given.
-        setLocked((current) => (current ? null : directionRef.current))
+        setLocked((current) => {
+          const next = current ? null : directionRef.current
+          if (next) {
+            rememberLockLearned()
+            setLearned(true)
+          }
+          return next
+        })
         return
       }
 
@@ -215,6 +256,6 @@ export function useDriveInput({
     locked: locked !== null,
     // Derived rather than stored, so there is no state that can survive the
     // key being let go and leave a hint hanging over the video.
-    lockHint: hintArmed && holding && !locked,
+    lockHint: hintArmed && holding && !locked && !learned,
   }
 }

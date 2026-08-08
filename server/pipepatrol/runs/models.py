@@ -82,23 +82,49 @@ class Defect:
 
 @dataclass
 class Recording:
-    """Where the video went. See runs/recorder.py for the format."""
+    """One video clip. See runs/recorder.py for the format.
 
+    A run holds a LIST of these. It used to hold one, written to a fixed
+    filename, so pressing record a second time silently overwrote the first
+    clip and the run kept only whatever was recorded last -- with the earlier
+    footage already gone from the card. Each clip now has its own id, its own
+    files, and the chainage it spans, which is what lets the longitudinal view
+    draw where in the pipe each one was taken.
+    """
+
+    id: str = field(default_factory=_new_id)
     file: str = ""
     index_file: str = ""
     frames: int = 0
     bytes: int = 0
+    started_at: float = 0.0
+    ended_at: float | None = None
+    # Where the robot was when this clip opened and closed. None when the run
+    # had no odometry to stamp -- a clip is still valid without them.
+    chainage_start_m: float | None = None
+    chainage_end_m: float | None = None
+
+    @property
+    def duration_s(self):
+        if self.ended_at is None:
+            return 0.0
+        return max(0.0, self.ended_at - self.started_at)
 
     def as_dict(self):
-        return asdict(self)
+        return {**asdict(self), "duration_s": round(self.duration_s, 1)}
 
     @classmethod
     def from_dict(cls, data):
         return cls(
+            id=data.get("id", _new_id()),
             file=data.get("file", ""),
             index_file=data.get("index_file", ""),
             frames=int(data.get("frames", 0)),
             bytes=int(data.get("bytes", 0)),
+            started_at=float(data.get("started_at", 0.0)),
+            ended_at=data.get("ended_at"),
+            chainage_start_m=data.get("chainage_start_m"),
+            chainage_end_m=data.get("chainage_end_m"),
         )
 
 
@@ -152,7 +178,8 @@ class Run:
 
     defects: list[Defect] = field(default_factory=list)
     snapshots: list[Snapshot] = field(default_factory=list)
-    recording: Recording | None = None
+    # Every clip recorded on this run, in the order they were taken.
+    recordings: list[Recording] = field(default_factory=list)
 
     # Sampled path, for the map. Appended at a fixed distance interval rather
     # than a time interval, so standing still does not fill it with duplicates.
@@ -181,7 +208,12 @@ class Run:
             "interrupted": self.interrupted,
             "defects": [d.as_dict() for d in self.defects],
             "snapshots": [s.as_dict() for s in self.snapshots],
-            "recording": self.recording.as_dict() if self.recording else None,
+            "recordings": [r.as_dict() for r in self.recordings],
+            # The old single-clip field, still written so an export or a console
+            # from before multi-clip recording keeps working. It is the FIRST
+            # clip rather than the last, because that is the one such a reader
+            # would have been shown when the run was recorded.
+            "recording": self.recordings[0].as_dict() if self.recordings else None,
             "path": self.path,
         }
 
@@ -199,12 +231,18 @@ class Run:
             "interrupted": self.interrupted,
             "defect_count": len(self.defects),
             "snapshot_count": len(self.snapshots),
-            "has_recording": self.recording is not None,
+            "has_recording": bool(self.recordings),
+            "recording_count": len(self.recordings),
         }
 
     @classmethod
     def from_dict(cls, data):
-        recording = data.get("recording")
+        # Runs recorded before clips were a list carry a single `recording`.
+        # Read either shape; only the list is ever written back.
+        recordings = data.get("recordings")
+        if recordings is None:
+            single = data.get("recording")
+            recordings = [single] if single else []
         origin = data.get("origin")
         return cls(
             id=data.get("id", _new_id()),
@@ -217,6 +255,6 @@ class Run:
             uncertainty_m=data.get("uncertainty_m", 0.0),
             defects=[Defect.from_dict(d) for d in data.get("defects", [])],
             snapshots=[Snapshot.from_dict(s) for s in data.get("snapshots", [])],
-            recording=Recording.from_dict(recording) if recording else None,
+            recordings=[Recording.from_dict(r) for r in recordings if r],
             path=data.get("path", []),
         )

@@ -173,15 +173,28 @@ async def get_snapshot(run_id: str, filename: str, robot=Depends(get_robot)):
 
 
 @router.get("/{run_id}/video")
-async def get_video(run_id: str, robot=Depends(get_robot)):
-    """The raw MJPEG. `ffmpeg -f mjpeg -i video.mjpeg out.mp4` converts it."""
+async def get_video(run_id: str, clip: str | None = None, robot=Depends(get_robot)):
+    """The raw MJPEG. `ffmpeg -f mjpeg -i video.mjpeg out.mp4` converts it.
+
+    `clip` names one recording by id; without it the first is served. The joined
+    version of every clip is the .mov endpoint below.
+    """
     run = robot.store.get(run_id)
-    if run is None or run.recording is None:
+    if run is None or not run.recordings:
         return JSONResponse({"error": "no recording for that run"}, status_code=404)
-    path = robot.store.run_dir(run_id) / run.recording.file
+    recording = _pick_clip(run, clip)
+    if recording is None:
+        return JSONResponse({"error": "no such clip"}, status_code=404)
+    path = robot.store.run_dir(run_id) / recording.file
     if not path.is_file():
         return JSONResponse({"error": "recording file is missing"}, status_code=404)
     return FileResponse(path, media_type="video/x-motion-jpeg")
+
+
+def _pick_clip(run, clip_id):
+    if clip_id is None:
+        return run.recordings[0]
+    return next((r for r in run.recordings if r.id == clip_id), None)
 
 
 @router.get("/{run_id}/video.mov")
@@ -192,22 +205,29 @@ async def get_video_mov(run_id: str, robot=Depends(get_robot)):
     written to the card -- see runs/video.py for why both of those matter.
     """
     run = robot.store.get(run_id)
-    if run is None or run.recording is None:
+    if run is None or not run.recordings:
         return JSONResponse({"error": "no recording for that run"}, status_code=404)
 
     directory = robot.store.run_dir(run_id)
-    path = directory / run.recording.file
-    if not path.is_file():
+    clips = [
+        recording
+        for recording in run.recordings
+        if (directory / recording.file).is_file()
+    ]
+    if not clips:
         return JSONResponse({"error": "recording file is missing"}, status_code=404)
     if not video_module.available():
         return JSONResponse(
             {"error": "ffmpeg is not installed on the robot"}, status_code=503
         )
 
-    fps = video_module.recorded_fps(directory / run.recording.index_file)
+    # Every clip, joined, in the order they were recorded. One rate for the
+    # whole thing: they were all captured by the same recorder at the same cap,
+    # and the first clip is the longest-running evidence of what that was.
+    fps = video_module.recorded_fps(directory / clips[0].index_file)
     filename = _download_name(run)
     return StreamingResponse(
-        video_module.remux(path, fps),
+        video_module.remux([directory / clip.file for clip in clips], fps),
         media_type=video_module.MEDIA_TYPE,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

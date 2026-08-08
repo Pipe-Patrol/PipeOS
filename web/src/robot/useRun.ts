@@ -12,6 +12,18 @@ import type { Run } from '@/robot/types'
  * the whole thing polling, because nothing here changes without the operator
  * doing something.
  */
+/**
+ * Fill in what an older robot may not send.
+ *
+ * A console can outrun the firmware on the Pi — deploys are separate — and the
+ * run page reads `recordings` in half a dozen places. One missing array there
+ * is a blank screen rather than a missing section, which is a bad trade for a
+ * field that used to be called something else.
+ */
+function normalise(run: Run): Run {
+  return { ...run, recordings: run.recordings ?? [] }
+}
+
 export function useRun(client: RobotClient | null, runId: string | null) {
   const [run, setRun] = useState<Run | null>(null)
   const [loading, setLoading] = useState(false)
@@ -24,7 +36,7 @@ export function useRun(client: RobotClient | null, runId: string | null) {
     }
     setLoading(true)
     try {
-      setRun(await client.request<Run>(`/api/runs/${runId}`))
+      setRun(normalise(await client.request<Run>(`/api/runs/${runId}`)))
       setError(null)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'could not load the run')
