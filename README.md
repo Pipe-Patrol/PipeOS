@@ -62,17 +62,10 @@ sudo apt install -y python3-opencv
 sudo systemctl restart pipepatrol
 ```
 
-Turning on the **IMU**:
+Turning on the **IMU and cliamte**:
 ```
 sudo apt install -y python3-opencv
 sudo raspi-config nonint do_i2c 0
-sudo reboot
-```
-
-Turning on the **climate**:
-```
-sudo raspi-config nonint do_i2c 0
-sudo reboot
 ```
 
 If you want to stop entering the password multiple times during deployment, open a new terminal, and run ```ssh-copy-id pipepatrol@pipepatrol.local```.
