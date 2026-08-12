@@ -86,6 +86,29 @@ EOF
   exit 1
 fi
 
+# --- 1b. is the root filesystem writable? -------------------------------------
+# Before the build, for the same reason the reachability probe is: a read-only
+# root takes rsync's copy into a RAM overlay, where every step below succeeds,
+# the console looks updated, and the next reboot silently throws the whole
+# deploy away. A confusing success is worse than a clear refusal.
+
+step "Checking the robot's filesystem is writable"
+if ssh "$TARGET" 'findmnt -no OPTIONS / | grep -qw ro'; then
+  cat <<EOF
+
+The robot's root filesystem is READ-ONLY (the overlay is on). Nothing was
+copied. Anything written now would live in RAM and be lost at the next reboot.
+
+Turn it off, deploy, then turn it back on:
+
+    ssh $TARGET 'sudo ~/PipeOS/server/deploy/readonly-root.sh disable && sudo reboot'
+    ./deploy.sh $TARGET
+    ssh $TARGET 'sudo ~/PipeOS/server/deploy/readonly-root.sh enable --data-device /dev/sda1 && sudo reboot'
+EOF
+  exit 1
+fi
+echo "Writable."
+
 # --- 2. the console, built here ------------------------------------------------
 # Built on this machine rather than on the Pi: a Pi 5 can run npm, but it takes
 # minutes and needs a toolchain the robot has no other use for.

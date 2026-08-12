@@ -67,6 +67,15 @@ COMMAND_TIMEOUT_S = 0.5  # no command for this long -> full stop
 MAX_CONTINUOUS_RUN_S = 0.0
 PWM_FREQUENCY_HZ = 1000
 
+# How long to wait before trying to claim the motor GPIO again after a failure.
+#
+# At boot the service can start before lgpio's chip node is ready, and claiming
+# a pin that is not there yet fails. Without a retry that failure is permanent
+# for the life of the process: the motors stay dead until someone restarts the
+# service, which is why redeploying "fixed" them. The IMU already recovers this
+# way (see hardware/imu.py); this is the same idea for the drivetrain.
+GPIO_RETRY_BACKOFF_S = 5.0
+
 # --- Self test ---
 #
 # The preflight check cannot confirm a motor without turning it. Nothing on this
@@ -119,11 +128,31 @@ class _MotorBackend:
 
     def __init__(self):
         self.available = False
+        self.error = None
+        self._attempts = 0
+        self._last_attempt_at = None
+        self.open()
+
+    def open(self):
+        """Try to claim the motor pins. Returns True if the motors are usable.
+
+        Safe to call repeatedly: a backend that is already open returns
+        immediately, and a failed attempt leaves every pin released so the next
+        one starts from the same place this one did.
+        """
+        if self.available:
+            return True
+
+        self._attempts += 1
+        self._last_attempt_at = time.monotonic()
+
         try:
             from gpiozero import DigitalOutputDevice, PWMOutputDevice
         except ImportError as exc:
-            log.error("gpiozero unavailable, motors are DISABLED: %s", exc)
-            return
+            # A missing library is not a race and will not fix itself, but it
+            # costs nothing to keep trying and it keeps one code path here.
+            self._fail(f"gpiozero unavailable: {exc}")
+            return False
 
         try:
             self.pwm_left = PWMOutputDevice(
@@ -135,11 +164,31 @@ class _MotorBackend:
             )
             self.dir_right = DigitalOutputDevice(PIN_DIR_RIGHT, initial_value=False)
         except Exception as exc:  # noqa: BLE001 - any GPIO failure must not crash us
-            log.error("could not claim motor GPIO, motors are DISABLED: %s", exc)
+            self._fail(f"could not claim motor GPIO: {exc}")
             self._release()
-            return
+            return False
 
+        if self._attempts > 1:
+            log.info("motor GPIO claimed after %d attempts -- motors are live", self._attempts)
+        self.error = None
         self.available = True
+        return True
+
+    def _fail(self, message):
+        """Record why the motors are down, logging it once per distinct reason.
+
+        Retrying every few seconds forever would otherwise fill the journal with
+        the same line, and a log that scrolls is a log nobody reads.
+        """
+        if message != self.error:
+            log.error("%s -- motors are DISABLED, will keep retrying", message)
+        self.error = message
+
+    def retry_due(self, now):
+        """Is it time for another attempt? False while the backend is working."""
+        if self.available:
+            return False
+        return now - self._last_attempt_at >= GPIO_RETRY_BACKOFF_S
 
     def apply(self, left, right):
         """Write signed duties to the hardware. Direction first, then magnitude."""
@@ -340,9 +389,28 @@ class Drive:
         the server, the socket, or the browser is the thing that broke.
         """
         with self._lock:
-            if self._closed or (self._left == 0.0 and self._right == 0.0):
+            if self._closed:
                 return
             now = time.monotonic()
+
+            # Before the limits, because a backend that came up late has to be
+            # picked up whether or not the robot is moving -- and if it is not
+            # available, it is not moving, so this is the only path that runs.
+            if self._backend.retry_due(now) and self._backend.open():
+                # Come up STOPPED, never at whatever was last commanded.
+                # command() keeps recording duties while the hardware is down,
+                # so an operator who was holding a key against a dead robot has
+                # a nonzero duty sitting here -- writing that to freshly claimed
+                # pins would make the robot lurch the instant it recovered.
+                # This also drives both direction pins to a known state rather
+                # than inheriting whatever the last process left on them.
+                self._apply(0.0, 0.0)
+                self._last_command_at = now
+                self._last_stop_reason = "motors reconnected"
+                log.info("motors reconnected, stopped -- command again to drive")
+
+            if self._left == 0.0 and self._right == 0.0:
+                return
 
             if now - self._last_command_at > COMMAND_TIMEOUT_S:
                 self._apply(0.0, 0.0)
@@ -402,6 +470,9 @@ class Drive:
                 "run_limit_tripped": self._run_limit_tripped,
                 "last_stop_reason": self._last_stop_reason,
                 "hardware": self._backend.available,
+                # Why the motors are down, for the console to show instead of
+                # leaving an operator to guess. None whenever hardware is True.
+                "hardware_error": self._backend.error,
                 "max_duty": MAX_DUTY,
                 "min_duty": MIN_DUTY,
             }

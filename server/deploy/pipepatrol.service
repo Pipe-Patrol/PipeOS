@@ -3,12 +3,20 @@ Description=PipeOS control server
 After=network-online.target
 Wants=network-online.target
 
+# Never stop trying to start. systemd's default is to give up permanently after
+# 5 starts in 10 seconds, which turns a burst of early crashes into a robot that
+# stays dead until someone SSHes in -- the exact failure this unit exists to
+# prevent. The robot should always be coming back.
+StartLimitIntervalSec=0
+
 [Service]
 Type=simple
 User=pipepatrol
 WorkingDirectory=/home/pipepatrol/PipeOS/server
 ExecStart=/home/pipepatrol/PipeOS/server/.venv/bin/python -m pipepatrol
-Restart=on-failure
+# always, not on-failure: a clean exit(0) is still a robot with no control
+# server, and there is no case where that is the state we want to leave it in.
+Restart=always
 RestartSec=3
 
 # SIGINT rather than SIGTERM: the handlers in app.py cut the motors on both, but

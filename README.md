@@ -113,6 +113,21 @@ Confirm the robot, press **Continue**, and you are in.
 
 **IMPORTANT**: When finished, always shut down the Pi in the GUI (settings > shutdown) or terminal before turning the robot off. Otherwise, the SD card will become corrupted, and reflashing will be required on the next start.
 
+This is a prototype's rule, and it is optional — see below.
+
+---
+
+## 4. Optional: make it an appliance
+
+Three one-time changes turn the robot into something you power on, connect to,
+and use, with no SSH and no shutdown ritual — and that survives having its plug
+pulled. See **[docs/APPLIANCE.md](docs/APPLIANCE.md)**.
+
+```bash
+sudo ~/PipeOS/server/deploy/hotspot.sh enable        # robot hosts its own WiFi
+sudo ~/PipeOS/server/deploy/readonly-root.sh enable --data-device /dev/sda1
+```
+
 ---
 
 
