@@ -159,9 +159,9 @@ function lightsCheck(telemetry: Telemetry): Check {
 }
 
 /**
- * Presence and health in one row. An IMU that is missing entirely still stops
- * the run, but it does it through the accelerometer row below rather than here:
- * that is the reading the distance estimate cannot do without.
+ * Presence and health in one row. Nothing about the IMU stops a run: without it
+ * the distance estimate falls back to duty integration and says so, which is
+ * worse data but still a run.
  */
 function imuCheck(telemetry: Telemetry): Check {
   const base = { id: 'imu', label: 'IMU', blocking: false } as const
@@ -172,10 +172,10 @@ function imuCheck(telemetry: Telemetry): Check {
 }
 
 function accelerometerCheck(telemetry: Telemetry): Check {
-  const base = { id: 'accelerometer', label: 'Accelerometer', blocking: true } as const
+  const base = { id: 'accelerometer', label: 'Accelerometer', blocking: false } as const
   const accel = telemetry.orientation.accel_m_s2
   if (accel == null || !Number.isFinite(accel)) {
-    return { ...base, status: 'fail', value: READING.unreadable }
+    return { ...base, status: 'warn', value: READING.unreadable }
   }
   return { ...base, status: 'pass', value: format.acceleration(accel) }
 }

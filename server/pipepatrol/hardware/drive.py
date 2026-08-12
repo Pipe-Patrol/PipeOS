@@ -41,6 +41,11 @@ PIN_DIR_LEFT = 5
 PIN_PWM_RIGHT = 13
 PIN_DIR_RIGHT = 6
 
+# The motors are fitted so a LOW direction pin drives the chassis backwards.
+# Corrected at the pin, not in the command, so a positive duty still means
+# forward everywhere else -- odometry and telemetry both depend on that.
+DIR_INVERTED = True
+
 # --- Tunable limits. Change them HERE and nowhere else. ---
 MAX_DUTY = 0.75  # ceiling applied to every motor command
 MIN_DUTY = 0.25  # below this the gearbox buzzes without turning -> treat as stall
@@ -140,8 +145,8 @@ class _MotorBackend:
         """Write signed duties to the hardware. Direction first, then magnitude."""
         if not self.available:
             return
-        self.dir_left.value = left < 0
-        self.dir_right.value = right < 0
+        self.dir_left.value = (left < 0) != DIR_INVERTED
+        self.dir_right.value = (right < 0) != DIR_INVERTED
         self.pwm_left.value = abs(left)
         self.pwm_right.value = abs(right)
 

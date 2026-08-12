@@ -74,10 +74,11 @@ export function candidates(): Candidate[] {
     found.push(candidate)
   }
 
-  // Only offer the origin when it could plausibly be a robot. On the Vite dev
-  // server it never is, and a permanently-failing row teaches the operator to
-  // ignore the list.
-  if (!isDevServer()) {
+  // Not offered on the dev server. It connects, but a laptop has no motors and
+  // no camera, so preflight blocks every run and the console is a dead end.
+  // Press T twice for the simulator instead; the model lab talks to the local
+  // server directly and needs no connection.
+  if (window.location.port !== '5173') {
     add({ baseUrl: '', label: 'This device', source: 'served' })
   }
 
@@ -91,10 +92,6 @@ export function candidates(): Candidate[] {
   }
 
   return found
-}
-
-function isDevServer(): boolean {
-  return window.location.port === '5173'
 }
 
 // --- remembered robots ---

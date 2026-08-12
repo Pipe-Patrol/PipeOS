@@ -24,6 +24,7 @@ never that driving stutters. See detector.py.
 
 import logging
 import os
+import platform
 import time
 from pathlib import Path
 
@@ -31,14 +32,31 @@ from pipepatrol.perception.detector import Detection
 
 log = logging.getLogger(__name__)
 
-# Where deploy.sh puts the exported graph. Overridable so a laptop can point at
-# a file somewhere else without editing anything.
-DEFAULT_MODEL_PATH = Path(
-    os.environ.get(
-        "PIPEPATROL_MODEL",
-        Path(__file__).resolve().parents[2] / "model" / "pipe-defects.onnx",
-    )
-)
+MODEL_DIR = Path(__file__).resolve().parents[2] / "model"
+FULL_MODEL = MODEL_DIR / "pipe-defects.onnx"
+# Smaller input, int8 weights. Several times faster on the Pi's CPU and less
+# accurate, particularly on thin defects like cracks.
+LITE_MODEL = MODEL_DIR / "pipe-defects-lite.onnx"
+
+
+def _default_model_path():
+    """The lite graph, everywhere.
+
+    It is the only one small enough to live in git, so it is the only one that is
+    guaranteed to be present on a fresh clone. Everything runs what the robot
+    runs, which also means a detection seen on a laptop is the detection the
+    robot would have made.
+
+    Set PIPEPATROL_MODEL to run the full graph instead -- worth doing on a laptop
+    when comparing accuracy, not worth doing on the Pi.
+    """
+    override = os.environ.get("PIPEPATROL_MODEL")
+    if override:
+        return Path(override)
+    return LITE_MODEL if LITE_MODEL.is_file() else FULL_MODEL
+
+
+DEFAULT_MODEL_PATH = _default_model_path()
 
 # Below this a detection is a guess, and a guess in an inspection report is worse
 # than a gap. The console can raise it further per operator; it cannot lower it

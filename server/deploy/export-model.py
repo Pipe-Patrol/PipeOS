@@ -91,10 +91,14 @@ def main():
     )
 
     print(f"exporting at {args.resolution}x{args.resolution} ...")
+    # Which .onnx files were already here. The package names its own output, so
+    # the new file is found by difference rather than by globbing and taking the
+    # first match — that used to rename an existing model out from under the
+    # robot as soon as the directory held more than one.
+    before = set(args.out.parent.glob("*.onnx"))
     model.export(output_dir=str(args.out.parent))
 
-    # The package names its output; move it to the name the robot looks for.
-    produced = next(args.out.parent.glob("*.onnx"), None)
+    produced = next(iter(set(args.out.parent.glob("*.onnx")) - before), None)
     if produced is None:
         sys.exit("the export produced no .onnx file")
     if produced != args.out:

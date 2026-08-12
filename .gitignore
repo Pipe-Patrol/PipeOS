@@ -32,6 +32,15 @@ audit/
 
 # The exported model. Produced by server/deploy/export-model.py on a laptop and
 # copied to the robot by deploy.sh — see MODEL.md. Kept out of git because it is
-# a ~115 MB binary regenerated from checkpoint_best_total.pth, and git is the
-# wrong place to version a build artefact that large.
+# a ~120 MB binary regenerated from checkpoint_best_total.pth, and git is the
+# wrong place to version a build artefact that large. GitHub rejects it anyway,
+# at over the 100 MB file limit.
 server/model/*.onnx
+
+# The exception: the robot's model is 43 MB, which git can carry. Committing it
+# is what makes a fresh clone deployable — clone, ./deploy.sh, and the Pi
+# detects defects, with no checkpoint to find and no export to run.
+!server/model/pipe-defects-lite.onnx
+
+# Agent worktrees and session state — local scratch, never part of the repo.
+.claude/

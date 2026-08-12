@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { DemoFeed } from '@/components/demo/DemoFeed'
-import { DemoPanel } from '@/components/demo/DemoPanel'
-import { useDemoDetections } from '@/components/demo/useDemoDetections'
 import { FinishRunPrompt } from '@/components/live/FinishRunPrompt'
 import { NoRunOverlay } from '@/components/live/NoRunOverlay'
 import { RegionDrawer } from '@/components/live/RegionDrawer'
@@ -27,9 +24,8 @@ import { detectionClassOf } from '@/constants/detection-classes'
 import { readError } from '@/lib/errors'
 import { useFeedBounds } from '@/lib/feedBounds'
 import { clearNotice, raiseNotice } from '@/lib/notices'
-import { useDemoMode } from '@/lib/demoMode'
 import { usePreferences } from '@/lib/preferences'
-import { useDemoShortcuts } from '@/lib/useDemoShortcuts'
+import { useDemoDay } from '@/lib/useDemoDay'
 import { regionFromBox } from '@/lib/region'
 import { useReturnHome } from '@/robot/ReturnHomeProvider'
 import { useRobot } from '@/robot/RobotProvider'
@@ -63,14 +59,7 @@ export function LiveRoute() {
   const { client, link, telemetry, disconnect } = useRobot()
   const home = useReturnHome()
   const prefs = usePreferences()
-  const demo = useDemoMode()
-  useDemoShortcuts(demo.enabled)
-
-  // The footage on screen, and the model's own reading of it. In demo mode the
-  // frames never reach the Pi on their own, so they are posted to it.
-  const demoRef = useRef<HTMLDivElement>(null)
-  const demoSource = demo.sources.find((entry) => entry.id === demo.activeId) ?? null
-  const demoDetections = useDemoDetections(client, demoSource, demoRef, demo.enabled)
+  useDemoDay(client)
 
   const [zoom, setZoom] = useState(1)
   const [ledLevel, setLedLevel] = useState(0)
@@ -166,9 +155,7 @@ export function LiveRoute() {
   // key act on exactly what the operator can see. A class muted in settings is
   // one the console has been told not to raise, and raising it silently would
   // be worse than not drawing it.
-  const visibleDetections = (
-    demo.enabled ? demoDetections : (telemetry?.detections ?? [])
-  ).filter(
+  const visibleDetections = (telemetry?.detections ?? []).filter(
     (detection) =>
       detection.confidence >= prefs.detectionThreshold &&
       !prefs.mutedClasses.includes(detectionClassOf(detection.label)?.name ?? ''),
@@ -261,7 +248,10 @@ export function LiveRoute() {
         setFinishing(false)
         setRunClosed(false)
         setEnding(false)
-        await refreshRun()
+        // Deliberately not refetching the run. It is sealed, so there is
+        // nothing new to read, and telemetry reporting no active run is what
+        // clears the screen a moment later. Fetching it here was a race against
+        // that clear — see the ticket in useRun.
         return
       }
 
@@ -279,7 +269,7 @@ export function LiveRoute() {
         setEnding(false)
       }
     },
-    [client, activeRunId, refreshRun, disconnect, runClosed],
+    [client, activeRunId, disconnect, runClosed],
   )
 
   const toggleRecording = useCallback(async () => {
@@ -465,22 +455,12 @@ export function LiveRoute() {
   return (
     <div className="flex h-full flex-col bg-ink-1000">
       <section ref={feedRef} className="relative min-h-0 flex-1">
-        {demo.enabled && demoSource ? (
-          <div ref={demoRef} className="absolute inset-0 overflow-hidden bg-black">
-            <DemoFeed
-              source={demoSource}
-              chainage_m={telemetry?.motion.chainage_m ?? 0}
-              secondsPerMetre={demo.secondsPerMetre}
-            />
-          </div>
-        ) : (
-          <VideoFeed
-            client={client}
-            zoom={zoom}
-            onZoom={setZoom}
-            stale={link.state !== 'connected'}
-          />
-        )}
+        <VideoFeed
+          client={client}
+          zoom={zoom}
+          onZoom={setZoom}
+          stale={link.state !== 'connected'}
+        />
 
         {/* The feed is dimmed until a run is open. Nothing on screen is being
             filed against anything yet, and the picture should not look as
@@ -556,13 +536,7 @@ export function LiveRoute() {
               </button>
             )}
 
-            {demo.enabled && (
-              <div className="absolute bottom-5 left-5 z-20">
-                <DemoPanel />
-              </div>
-            )}
-
-            {prefs.showMap && !demo.enabled && (
+            {prefs.showMap && (
             <div className="absolute bottom-5 left-5 z-10">
               <PipeMap
                 path={trail}

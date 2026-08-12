@@ -123,6 +123,25 @@ export function ModelSettings() {
           })}
         </ul>
       </div>
+
+      <Row
+        label="Model lab"
+        hint="Drop a frame in and see what the model makes of it, outside a run"
+      >
+        {/* A link, not a route. The lab is a standalone page in temptest/ and
+            deliberately not part of the console: it exists to answer "does the
+            model work" without a robot, a run or a preflight, and giving it a
+            route here would make it look like a feature of the product. If the
+            folder has been deleted the link 404s, which is the honest answer. */}
+        <a
+          href="/model-lab"
+          target="_blank"
+          rel="noreferrer"
+          className="rounded-sm px-2 py-1 text-[12px] text-ink-300 transition-colors hover:bg-white/8 hover:text-ink-0"
+        >
+          Open ↗
+        </a>
+      </Row>
     </Section>
   )
 }

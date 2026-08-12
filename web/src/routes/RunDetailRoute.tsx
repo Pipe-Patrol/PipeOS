@@ -243,7 +243,7 @@ const NO_MOTION = {
   heading_deg: 0,
   position: { x: 0, y: 0 },
   source: 'stopped',
+  blind: false,
   slipping: false,
   calibrated: false,
-  accel_m_s2: null,
 } as const

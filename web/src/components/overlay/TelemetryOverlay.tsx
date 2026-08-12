@@ -36,10 +36,15 @@ interface TelemetryOverlayProps {
  * absolutely so their width can never move what is behind them. They go blank,
  * not stale, when the sensor stops answering.
  *
- * Acceleration sits under the distance, sized to be read rather than squinted
- * at, because it is what says the robot is actually moving. It reads a clean 0
- * inside the sensor's noise floor (hardware/imu.py), so a still robot shows a
- * still number instead of jitter.
+ * Speed sits under the distance, sized to be read rather than squinted at,
+ * because it is what says the robot is actually moving. It is the same
+ * measurement the distance is accumulated from — optical flow, and nothing else
+ * — so the two can never tell different stories, which is exactly what the old
+ * acceleration readout beside a duty-fused distance could do.
+ *
+ * The distance goes amber when the camera has stopped supporting it. A blind
+ * estimator does not slow down, it stops counting, and a number that has quietly
+ * stopped counting looks identical to a robot holding station.
  */
 export function TelemetryOverlay({
   telemetry,
@@ -53,10 +58,10 @@ export function TelemetryOverlay({
       <Readout
         label="Distance"
         value={format.metres(Math.abs(motion.chainage_m))}
-        detail={format.acceleration(motion.accel_m_s2)}
+        detail={format.speed(motion.speed_m_s)}
         quality="estimated"
         size="lg"
-        state={motion.slipping ? 'warn' : 'normal'}
+        state={motion.blind ? 'warn' : 'normal'}
       />
 
       <div className="relative flex justify-center">

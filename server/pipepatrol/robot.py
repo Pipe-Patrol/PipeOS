@@ -40,7 +40,7 @@ class Robot:
         self.camera = Camera()
 
         self.flow = OpticalFlow(self.camera)
-        self.odometry = Odometry(self.drive, self.imu, self.flow)
+        self.odometry = Odometry(self.flow)
         self.hazards = Hazards(self.drive, self.imu, self.flow)
 
         self.store = store or RunStore()

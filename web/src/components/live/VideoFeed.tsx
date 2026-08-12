@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { clampZoom } from '@/components/live/ZoomControl'
+import { useTempTestFrame } from '@/dev/useTempTestFrame'
 import type { RobotClient } from '@/robot/client'
 
 interface VideoFeedProps {
@@ -74,6 +75,7 @@ function clampOffset(offset: Offset, scale: number, width: number, height: numbe
  * exception to that rule.
  */
 export function VideoFeed({ client, zoom, onZoom, stale }: VideoFeedProps) {
+  const supplied = useTempTestFrame()
   const [nonce, setNonce] = useState(() => Date.now())
   const [failed, setFailed] = useState(false)
   const [offset, setOffset] = useState<Offset>({ x: 0, y: 0 })
@@ -220,8 +222,8 @@ export function VideoFeed({ client, zoom, onZoom, stale }: VideoFeedProps) {
     >
       {!failed && (
         <img
-          key={nonce}
-          src={client.cameraUrl(nonce)}
+          key={supplied ? 'supplied' : nonce}
+          src={supplied ?? client.cameraUrl(nonce)}
           alt=""
           draggable={false}
           onError={() => setFailed(true)}

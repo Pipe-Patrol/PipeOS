@@ -140,8 +140,40 @@ def create_app():
     for router in ROUTERS:
         app.include_router(router)
 
+    # Before the console: that one is a catch-all and would swallow anything
+    # registered after it.
+    _mount_demoday(app)
     _mount_console(app)
     return app
+
+
+def _mount_demoday(app: FastAPI):
+    """Add the demo day tooling, if it is still installed.
+
+    Loaded from a path rather than imported, because `demoday/` is not part of
+    this package and is meant to be deletable: delete the folder and the whole
+    feature is gone, leaving this function finding nothing and saying so at
+    debug level. Nothing else in the server knows it exists.
+
+    See demoday/README.md.
+    """
+    module_path = config.REPO_ROOT / "demoday" / "router.py"
+    if not module_path.is_file():
+        log.debug("no demoday folder at %s, skipping", module_path.parent)
+        return
+
+    import importlib.util
+
+    try:
+        spec = importlib.util.spec_from_file_location("pipepatrol_demoday", module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        app.include_router(module.router)
+    except Exception as exc:  # noqa: BLE001 - a broken demo tool must not stop the robot
+        log.warning("demoday present but would not load: %s", exc)
+        return
+
+    log.info("demo day tooling mounted from %s", module_path.parent)
 
 
 # index.html names the hashed bundle, so a stale copy loads a stale app. Without

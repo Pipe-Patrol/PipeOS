@@ -101,14 +101,29 @@ npm run build
 
 # The exported model rides along inside server/. It is not in server/data,
 # which is excluded above because that is where the robot keeps its own runs.
-if [ -f "$HERE/server/model/pipe-defects.onnx" ]; then
-  echo "defect model: $(du -h "$HERE/server/model/pipe-defects.onnx" | cut -f1) — will be copied"
+# The robot runs the lite graph -- smaller input, int8 weights, several times
+# faster on a Pi. The full one is for laptops and is not worth the SD card.
+MODEL_EXCLUDE=()
+if [ -f "$HERE/server/model/pipe-defects-lite.onnx" ]; then
+  echo "defect model: $(du -h "$HERE/server/model/pipe-defects-lite.onnx" | cut -f1) (lite) — will be copied"
+  MODEL_EXCLUDE+=(--exclude 'server/model/pipe-defects.onnx' --exclude 'server/model/pipe-defects-384.onnx')
+elif [ -f "$HERE/server/model/pipe-defects.onnx" ]; then
+  echo "defect model: $(du -h "$HERE/server/model/pipe-defects.onnx" | cut -f1) (full — no lite build) — will be copied"
 else
   echo "defect model: NOT PRESENT — the robot will run with detection disabled."
   echo "  Export it first (on a laptop, not the Pi):"
   echo "    python3 -m venv /tmp/export"
   echo "    /tmp/export/bin/pip install rfdetr onnx onnxruntime"
   echo "    /tmp/export/bin/python server/deploy/export-model.py ~/Downloads/checkpoint_best_total.pth"
+fi
+
+# Demo day, if it is still installed. Listed conditionally so that deleting the
+# folder is genuinely all it takes to ship without it -- an unconditional entry
+# here would make rsync fail on a repo that no longer has it. See demoday/README.
+EXTRA=()
+if [ -d "$HERE/demoday" ]; then
+  EXTRA+=(demoday)
+  echo "demo day tooling: present — will be copied"
 fi
 
 step "Copying to $TARGET"
@@ -121,7 +136,8 @@ rsync -az --delete \
   --exclude 'server/data' \
   --exclude 'web/src' \
   --exclude 'web/node_modules' \
-  README.md docs server web deploy.sh \
+  "${MODEL_EXCLUDE[@]}" \
+  README.md docs server web deploy.sh "${EXTRA[@]}" \
   "$TARGET:$REMOTE_DIR/"
 
 # --- 4. python environment ----------------------------------------------------

@@ -76,15 +76,25 @@ class FakeFlow:
     def __init__(self):
         self.sample = FlowSample()
 
-    def see(self, divergence, magnitude=20.0):
+    def see(self, divergence, magnitude=20.0, speed_m_s=None):
+        """A tracked scene. `speed_m_s` is what the pipe's geometry priced it at.
+
+        None means the features were tracked but the geometry could not turn
+        them into metres — which odometry treats as no measurement at all,
+        because an unpriced divergence is not a speed.
+        """
         self.sample = FlowSample(
-            divergence=divergence, magnitude=magnitude, features=60, valid=True
+            divergence=divergence,
+            magnitude=magnitude,
+            features=60,
+            valid=True,
+            speed_m_s=speed_m_s,
         )
 
     def see_nothing(self):
         """Valid measurement, nothing moving. Not the same as an invalid one."""
         self.sample = FlowSample(
-            divergence=0.0, magnitude=0.0, features=60, valid=True
+            divergence=0.0, magnitude=0.0, features=60, valid=True, speed_m_s=0.0
         )
 
     def blind(self):

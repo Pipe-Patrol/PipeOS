@@ -39,7 +39,7 @@ def build(robot):
         "at": round(time.time(), 3),
         "drive": drive,
         "orientation": _orientation(imu),
-        "motion": _motion(odometry, imu, flow),
+        "motion": _motion(odometry, flow),
         "power": _power(robot),
         "camera": camera,
         "lights": lights,
@@ -95,16 +95,20 @@ def _orientation(imu):
     }
 
 
-def _motion(odometry, imu, flow):
+def _motion(odometry, flow):
     """Distance and speed, both estimated. The tier is in the payload, not a comment.
 
     The tracked features ride along because distance is measured off the picture
     and an operator has no other way to tell a confident estimate from one the
     camera has stopped supporting -- the number keeps updating either way.
+
+    No acceleration here any more. It used to ride along because the distance was
+    partly integrated from it; the distance is now purely visual, and an IMU
+    reading sitting inside the motion block would imply it still had a say. It
+    is still published under `orientation`, which is where preflight reads it.
     """
     return {
         **odometry,
-        "accel_m_s2": imu["accel_m_s2"],
         "flow_points": flow.get("points") or None,
     }
 

@@ -170,9 +170,14 @@ class TestExport:
         )
 
         text = export.to_csv(run).decode()
+        header, row = text.splitlines()[0], text.splitlines()[1]
 
-        assert "chainage_uncertainty_m" not in text
-        assert "1.5" not in text
+        assert "chainage_uncertainty_m" not in header
+        # Checked per field rather than as a substring of the whole row: the
+        # first column is a timestamp, and an epoch second beginning "1.5" made
+        # this fail roughly one run in ten for a reason that had nothing to do
+        # with the uncertainty.
+        assert "1.5" not in row.split(",")
 
     def test_the_uncertainty_is_still_in_the_json(self):
         run = Run(name="run")

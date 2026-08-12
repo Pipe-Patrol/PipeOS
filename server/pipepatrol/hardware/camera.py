@@ -197,16 +197,39 @@ def _scale_to_range(value, bounds):
     return int(round(default + value * (default - minimum)))
 
 
+# How long a supplied stream may go quiet before the sensor takes its own
+# output back. Whatever was writing frames has stopped or gone away, and a feed
+# frozen on somebody else's last frame is worse than a live one.
+SUPPLIED_TIMEOUT_S = 2.0
+
+
 class StreamingOutput(io.BufferedIOBase):
-    """Holds exactly one frame: the most recent one."""
+    """Holds exactly one frame: the most recent one.
+
+    A writer may take the stream over by passing `supplied=True`, which mutes
+    the sensor for as long as it keeps writing. Nothing in this package does
+    that; it is the seam an external tool can push frames through without the
+    estimators, the recorder or the stream endpoint knowing where a frame came
+    from. It gives itself back on its own after SUPPLIED_TIMEOUT_S.
+    """
 
     def __init__(self):
         self.frame = None
         self.sequence = 0
         self.condition = threading.Condition()
+        self.supplied_at = None
 
-    def write(self, buf):
+    def write(self, buf, supplied=False):
+        if not supplied and self.supplied_at is not None:
+            if time.monotonic() - self.supplied_at < SUPPLIED_TIMEOUT_S:
+                # Swallowed, not raised: the backend is a driver thread pushing
+                # frames on its own clock and has nowhere to put an error.
+                return len(buf)
+            self.supplied_at = None
+
         with self.condition:
+            if supplied:
+                self.supplied_at = time.monotonic()
             self.frame = buf
             self.sequence += 1
             self.condition.notify_all()
