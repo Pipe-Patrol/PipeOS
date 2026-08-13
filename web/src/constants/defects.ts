@@ -26,6 +26,7 @@ export const DEFECT_TYPES: DefectType[] = [
   { code: 'DEF', label: 'Deformation', group: 'Structural' },
   { code: 'JD', label: 'Joint displacement', group: 'Structural' },
   { code: 'SD', label: 'Surface damage', group: 'Structural' },
+  { code: 'UT', label: 'Utility intrusion', group: 'Structural' },
 
   { code: 'RO', label: 'Roots', group: 'Service' },
   { code: 'DE', label: 'Deposits', group: 'Service' },

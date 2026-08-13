@@ -32,11 +32,6 @@ log = logging.getLogger(__name__)
 # The trained classes, in the console's own codes from web/src/constants/defects.ts.
 # Change the right-hand side to change what the operator sees; nothing else
 # depends on the model's own naming.
-#
-# Utility intrusion has no code of its own yet, so it lands on OB: another
-# utility bored through the pipe is, literally, an object restricting the bore.
-# Give it its own entry in defects.ts and change one line here when there is
-# time, because "obstacle" undersells a gas line through a sewer.
 LABELS = {
     1: "CR",   # crack
     2: "DE",   # deposition
@@ -44,10 +39,18 @@ LABELS = {
     4: "JD",   # joint offset
     5: "OB",   # obstruction
     6: "RO",   # root intrusion
-    7: "OB",   # utility intrusion, see above
+    7: "UT",   # utility intrusion
 }
 
-CONF_THRESHOLD = float(os.environ.get("PIPEPATROL_CONF_THRESHOLD", "0.30"))
+# The floor a detection has to clear. Low on purpose: cracks are thin and the
+# model is cautious about them, so 0.5 misses most of them while 0.3 costs
+# little, since precision on cracks stays around 0.7 either way.
+#
+# Deliberately not an environment variable. `minConfidence` in the run setup
+# panel is where this belongs, per docs/DETECTION-SETTINGS.md, and a second
+# configuration surface would mean an export could not say what the model was
+# told. This is the default that setting overrides once it is wired.
+CONF_THRESHOLD = 0.30
 
 # Fraction of the frame the anomaly bank sees, centred. Inspection footage
 # carries fixed hardware and overlays near the edges, and those score high in
