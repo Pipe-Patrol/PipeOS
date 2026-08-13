@@ -36,17 +36,21 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: '?', action: 'This list', group: 'View' },
   { keys: 'Esc', action: 'Close whatever is open', group: 'View' },
 
-  // Logitech F310 in XInput mode. The triggers are deliberately unmapped: they
-  // are the two controls a thumb finds by accident.
+  // DualSense naming. The indices are the Gamepad API's standard mapping, which
+  // an Xbox pad shares — cross sits where A does — so an F310 works too, read
+  // positionally. The full layout is the Controller tab of this sheet.
+  //
+  // L2 and R2 are deliberately unmapped: the two controls a hand finds by
+  // accident.
   { keys: 'Stick / D-pad ↑↓', action: 'Drive', group: 'Gamepad' },
-  { keys: 'A', action: 'Take a snapshot', group: 'Gamepad' },
-  { keys: 'B', action: 'Flag what the model is surest about', group: 'Gamepad' },
-  { keys: 'X', action: 'Lights', group: 'Gamepad' },
-  { keys: 'Y', action: 'Start or stop recording', group: 'Gamepad' },
-  { keys: 'LB / RB', action: 'Zoom out · in', group: 'Gamepad' },
+  { keys: 'Cross ✕', action: 'Take a snapshot', group: 'Gamepad' },
+  { keys: 'Circle ○', action: 'Flag what the model is surest about', group: 'Gamepad' },
+  { keys: 'Square □', action: 'Lights', group: 'Gamepad' },
+  { keys: 'Triangle △', action: 'Start or stop recording', group: 'Gamepad' },
+  { keys: 'L1 / R1', action: 'Zoom out · in', group: 'Gamepad' },
   { keys: 'D-pad ← →', action: 'Camera brightness', group: 'Gamepad' },
-  { keys: 'Back', action: 'Reset zoom and brightness', group: 'Gamepad' },
-  { keys: 'Start (hold)', action: 'Return home · held, not tapped', group: 'Gamepad' },
+  { keys: 'Create', action: 'Reset zoom and brightness', group: 'Gamepad' },
+  { keys: 'Options (hold)', action: 'Return home · held, not tapped', group: 'Gamepad' },
 
   { keys: 'D D', action: 'Demo day mode on or off', group: 'Demo day' },
   { keys: '← →', action: 'Switch footage, in demo day mode', group: 'Demo day' },

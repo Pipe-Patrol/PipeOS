@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 
+import { GamepadGuide } from '@/components/live/GamepadGuide'
 import { ShortcutList } from '@/components/live/ShortcutList'
 import { Button } from '@/components/primitives/Button'
 import { Choice, Fact, Range, Row, Section, Toggle } from '@/components/settings/controls'
@@ -261,6 +262,15 @@ export function SettingsRoute() {
       <Section title="Shortcuts">
         <div className="px-4 py-3">
           <ShortcutList />
+        </div>
+      </Section>
+
+      <Section
+        title="Controller"
+        description="The pad layout, for driving without a keyboard."
+      >
+        <div className="px-4 py-3">
+          <GamepadGuide />
         </div>
       </Section>
 

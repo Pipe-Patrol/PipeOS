@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 /**
- * Gamepad support, built around the Logitech F310 in XInput mode.
+ * Gamepad support, over the Gamepad API's standard mapping.
  *
  * The browser deliberately hides gamepads until one of their buttons is
  * pressed — a page cannot enumerate controllers on load, because that is a
@@ -9,8 +9,14 @@ import { useEffect, useRef, useState } from 'react'
  * a prompt telling the operator to press a button, after which the pad appears.
  * That is what `connected` is for.
  *
- * Set the F310's rear switch to X (XInput). In D mode the axis and button
- * indices below are different and nothing will map correctly.
+ * BRAND-NEUTRAL INDICES. Standard mapping puts the DualSense's cross where an
+ * Xbox pad puts A, circle where B is, and so on down the list, so the constants
+ * below are correct for both and nothing here needs to know which is plugged
+ * in. The console labels them the PlayStation way because that is the pad in
+ * the case; components/live/GamepadGuide.tsx is where that choice lives.
+ *
+ * An F310 must have its rear switch on X (XInput). In D mode it does not report
+ * standard mapping and nothing lines up.
  */
 
 /** Sticks rest a little off centre. Below this is treated as released. */
