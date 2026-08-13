@@ -52,9 +52,14 @@ ssh access to the Pi and the Pi's apt packages: see
 
 ### The defect model
 
-The robot runs the model as an ONNX graph. Producing that graph needs PyTorch,
-running it does not, so the export happens **on your computer** and only the
-result crosses to the Pi. Do this once per trained checkpoint:
+**The model does not run on the Pi.** It ran there once and cost seconds per
+frame with the cores pinned and the board overheating, so it now runs on your
+computer: the robot posts camera frames over the network and gets boxes back.
+The deploy actively keeps it off the Pi — it deletes any graph a previous deploy
+left behind and uninstalls `onnxruntime` from the robot's venv.
+
+Once per trained checkpoint, export it (this needs PyTorch, which running the
+model does not):
 
 ```bash
 python3 -m venv /tmp/export
@@ -62,14 +67,23 @@ python3 -m venv /tmp/export
 /tmp/export/bin/python server/deploy/export-model.py ~/Downloads/checkpoint_best_total.pth
 ```
 
-That writes `server/model/pipe-defects.onnx`. After it exists, `./deploy.sh`
-installs it with everything else — nothing extra to run. The deploy prints
-whether the model loaded on the robot, so a missing one is caught then rather
-than mid-inspection.
+Then, on your computer, install what serves it and start it:
 
-Without it the robot still drives, records and logs defects by hand; it just
-detects nothing. See [MODEL.md](MODEL.md) for the class list and for how to
-time inference on the Pi.
+```bash
+cd server
+.venv/bin/pip install -r requirements.txt -r requirements-detect.txt
+.venv/bin/python detect-host.py
+```
+
+Leave that running whenever you want detection. `./deploy.sh` works out this
+machine's address and points the robot at it, then checks **from the Pi** that
+it can actually be reached — so a laptop on the wrong network is caught during
+the deploy rather than mid-inspection. Change the address later without
+redeploying in **Settings → Detection host**.
+
+Without a reachable host the robot still drives, records and logs defects by
+hand; it just detects nothing. See [MODEL.md](MODEL.md) for the class list and
+the details.
 
 ### If coming from a newly flashed SD card
 
@@ -155,22 +169,25 @@ detection.
 ### Run the model on your computer
 
 The simulator fakes telemetry but not the model. To see real detections without
-a Pi, run the actual server locally — it loads the same ONNX graph the robot
-would:
+a Pi, run the actual server locally — your machine is where the model runs
+anyway, so this is the same graph the robot would be getting answers from:
 
 ```bash
 cd server
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt -r requirements-detect.txt
 .venv/bin/python -m pipepatrol        # http://localhost:8000
 ```
 
 Then open the console at `http://localhost:5173`, and enter `localhost:8000` as
 the robot address. Press **D twice** for demo day mode, load a pipe video or
-some stills, and the frames go to your machine's copy of the model exactly as
-they would go to the robot's.
+some stills, and the frames go to your machine's copy of the model.
 
 Your laptop has no camera on a pipe and no motors, so the live feed and driving
 are unavailable — this is for exercising the model and the detection UI.
+
+To serve the model *to a robot* rather than exercise it locally, run
+`detect-host.py` instead — same model, none of the robot subsystems, port 8600.
 
 ### Tests
 
@@ -195,6 +212,14 @@ ssh pipepatrol@pipepatrol.local 'sudo systemctl restart pipepatrol' # bounce the
 ssh pipepatrol@pipepatrol.local 'journalctl -u pipepatrol -f'       # watch the logs live
 journalctl -u pipepatrol | grep -i "DISABLED\|unavailable        
 ```
+No detections? The model is on your computer, so check that end first:
+
+```bash
+curl -s localhost:8600/api/health                                   # is detect-host.py running?
+curl -s http://pipepatrol.local:8000/api/detector-host              # what is the robot pointed at, and does it work?
+ssh pipepatrol@pipepatrol.local 'curl -s http://<your-ip>:8600/api/health'   # can the robot reach you?
+```
+
 ```bash
 ssh pipepatrol@pipepatrol.local 'journalctl -u pipepatrol -b | grep -i camera'
 curl -s http://pipepatrol.local:8000/api/telemetry | python3 -m json.tool | grep -A8 '"camera"'
@@ -209,14 +234,15 @@ PipeOS/
 │   │   ├── api/             REST + WebSocket endpoints
 │   │   ├── estimation/      odometry, optical flow, obstacle estimates
 │   │   ├── hardware/        drive, camera, IMU, lights, host stats
-│   │   ├── perception/      defect detector
+│   │   ├── perception/      defect detection: local model, and the remote client
 │   │   ├── runs/            run storage, recording, export
 │   │   ├── app.py           app wiring + CORS
 │   │   ├── config.py        every environment knob
 │   │   ├── robot.py         owns all subsystems + the control loops
 │   │   └── telemetry.py     the telemetry envelope
 │   ├── tests/               safety, odometry, hazards, runs, api, camera
-│   └── deploy/              systemd unit
+│   ├── deploy/              systemd unit
+│   └── detect-host.py       serves the model from your computer, for the robot
 ├── web/                     React + TypeScript operator console
 │   └── src/
 │       ├── components/      live overlay, map, panels, shell, primitives

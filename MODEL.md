@@ -41,14 +41,32 @@ table; an operator can override any of them in settings, stored per device.
 adjacent in the list and look alike on camera, and near-identical colours there
 would turn a misread into a confident one.
 
-## Installing it on the robot
+## Where it runs: not on the robot
 
-Two steps. The first is manual and happens once per trained model; the second is
-the normal deploy.
+**The Pi does no inference.** RF-DETR on a Pi 5 is seconds per frame with three
+of its four cores saturated, and the board gets hot enough doing it that a long
+inspection is a thermal problem before it is an accuracy one — for a graph and a
+runtime that between them cost most of a gigabyte of SD card.
 
-**1. Export the checkpoint to ONNX — on a laptop, not the Pi.** This needs
-PyTorch and the `rfdetr` package, several gigabytes of it, none of which is
-needed to *run* the model.
+So the model runs on a laptop. The robot posts the JPEG it already encoded for
+the video stream to that laptop, and the laptop answers with boxes. The Pi's
+share of the work is one HTTP POST of a frame it was going to encode anyway.
+
+The deploy enforces this rather than trusting it. Every `./deploy.sh`:
+
+- excludes `server/model` from the copy — no graph crosses;
+- **deletes** `server/model` on the Pi if an older deploy left one there
+  (`rsync --delete` does not remove excluded paths, so this is explicit);
+- **uninstalls** `onnxruntime` from the Pi's venv (dropping a line from
+  `requirements.txt` never uninstalls anything);
+- sets `PIPEPATROL_LOCAL_MODEL=0` in the systemd unit, so a graph that
+  reappears — restored from a backup, copied by hand — still cannot put the Pi
+  back to work.
+
+### Setting it up
+
+**1. Export the checkpoint to ONNX.** Once per trained model. Needs PyTorch and
+`rfdetr`, several gigabytes of it, none of which is needed to *run* the model.
 
 ```bash
 python3 -m venv /tmp/export
@@ -56,23 +74,50 @@ python3 -m venv /tmp/export
 /tmp/export/bin/python server/deploy/export-model.py ~/Downloads/checkpoint_best_total.pth
 ```
 
-That writes `server/model/pipe-defects.onnx`. Deliberately not `server/data/`,
-which `deploy.sh` excludes because it is where the robot keeps its own runs.
+That writes `server/model/pipe-defects.onnx`, which stays on your machine. The
+`.pth` file is never used at inference; it is export input only.
 
-**2. Deploy as usual.**
+**2. Install what serves it, on your machine only.**
+
+```bash
+cd server
+.venv/bin/pip install -r requirements.txt -r requirements-detect.txt
+```
+
+**3. Run the detection host.**
+
+```bash
+.venv/bin/python detect-host.py
+```
+
+It serves `POST /api/detect` and `GET /api/health` on port 8600 — 8600 rather
+than 8000 so it coexists with the Vite dev server and with a full local server
+on demo day. On startup it prints the addresses to point the robot at.
+
+**4. Deploy.**
 
 ```bash
 ./deploy.sh
 ```
 
-`server/` is already in the rsync list so the model goes over with everything
-else, and `onnxruntime` is in `requirements.txt` so the Pi installs it during
-the venv step. Nothing extra to do. The deploy prints the model's size before
-copying, and on the robot prints either `ready — pipe-defects.onnx at 560px` or
-`NOT LOADED — <reason>`, so a missing model is something you find out during the
-deploy rather than forty metres into a pipe.
+The deploy works out this machine's address on the interface that actually
+routes to the Pi — not the first one `ifconfig` lists, which on a laptop with
+Docker or a VPN is a different and unreachable answer — and writes it into the
+robot's service. Then, **from the Pi**, it fetches `/api/health` on that address
+and prints either `ready — http://10.0.0.4:8600 serving pipe-defects-lite.onnx
+at 384px` or the reason it could not. Checking from the robot rather than from
+the laptop is the point: the laptop can obviously reach itself.
 
-The `.pth` file is never used on the robot. It is export input only.
+### Changing the address later
+
+A DHCP lease is a guess. **Settings → Detection host** on the console sets it on
+a running robot, persisted to `server/data/detector-host.txt` so it survives a
+power-cycle, and it outranks whatever the deploy baked in. Clear the field to
+fall back to the deployed address; empty means detection is simply off.
+
+That field is also where the failure shows up. `cannot reach 10.0.0.4:8600`
+tells an operator their laptop is asleep or on the wrong network — a bare
+"detection unavailable" would send them looking at the robot.
 
 ### Checking it, and timing it
 
@@ -80,31 +125,53 @@ The `.pth` file is never used on the robot. It is export input only.
 .venv/bin/python deploy/try-model.py some-pipe.jpg --save /tmp/boxed.jpg
 ```
 
-Reports what it found and the median inference time. Run it on the Pi: every
-decision about how the console behaves follows from that one number, and it can
-only be measured on the machine that will run it. `--save` draws the boxes on
-the image, which is the fastest way to spot transposed coordinates.
-
-If it is too slow, the two levers are int8 quantisation (typically 2–3× on ARM,
-some accuracy cost) and a smaller export resolution — cost is quadratic, so 392
-is roughly half of 560.
+Reports what it found and the median inference time. `--save` draws the boxes on
+the image, which is the fastest way to spot transposed coordinates. Run it on
+whatever machine serves the model — that is now the machine whose speed decides
+anything.
 
 ## Serving it
 
-`perception/rfdetr.py` runs the exported graph under onnxruntime, which has
-wheels for both aarch64 Linux and macOS — the Pi runs the same file a laptop
-tested. `best_detector()` picks it when it loads and falls back to a
-`NullDetector` carrying the reason when it does not, so a robot with no model
-still starts, drives and records.
+Two backends behind one interface (`name`, `available`, `infer(jpeg)`), so
+`DetectionService`, the run recorder, the map flags and the console cannot tell
+which is behind them:
 
-Inference takes seconds per frame on a Pi. That is why the detector runs off the
-video path entirely — the stream never waits on it — and why every detection is
-stamped with the moment it was made rather than being drawn as if it described
-the current frame.
+- `perception/rfdetr.py` runs the exported graph under onnxruntime. This is what
+  `detect-host.py` and a laptop dev server use.
+- `perception/remote.py` posts frames to a detection host. This is what the
+  robot uses, and on the robot it is the only one that can ever be selected.
 
-It is an **image** model with no memory between frames, so the same crack in
-three consecutive frames is three independent guesses and boxes may flicker.
-That is inherent to running a still-image detector over video.
+`best_detector()` picks remote when a host is configured. Without one it falls
+back to a `NullDetector` carrying the reason, so a robot that cannot reach its
+laptop still starts, drives and records — it just detects nothing.
+
+**A configured host counts as available even while it is unreachable.** The
+sampling loop only runs for an available backend, so treating a sleeping laptop
+as unavailable would latch detection off for the rest of the run; instead the
+loop keeps trying and detections resume on their own when the laptop wakes.
+
+Inference is still off the video path entirely — the stream never waits on it —
+because that was always the right shape, not merely a workaround for a slow Pi.
+
+### One frame at a time
+
+Each inference **replaces** the previous one, including when it finds nothing.
+Detections used to accumulate and fade out individually over six seconds, which
+made sense when inference was seconds per frame and boxes trickled in one at a
+time. With the model on a laptop the results arrive fast enough that the only
+thing fading produced was several overlapping generations of boxes for the same
+crack. So `DetectionService` keeps the last result, whole, and the console draws
+it solid.
+
+The six-second timer survives as a staleness guard rather than a fade: if
+results stop arriving at all — the host went away, the model threw — the last
+frame's boxes are dropped as a unit rather than sitting on the glass describing
+a stretch of pipe the robot left long ago. An empty overlay now means the model
+sees nothing, not that a box expired.
+
+It is still an **image** model with no memory between frames, so the same crack
+in consecutive frames is independent guesses and boxes may shift. That is
+inherent to running a still-image detector over video.
 
 ## Accuracy
 

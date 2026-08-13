@@ -1,0 +1,24 @@
+# Serving the defect model, on a laptop. NOT installed on the robot.
+#
+# The robot does no inference: it posts frames to whatever machine is running
+# server/detect-host.py, which is what these are for. Install them on top of
+# requirements.txt.
+#
+#   cd server
+#   .venv/bin/pip install -r requirements.txt -r requirements-detect.txt
+#   .venv/bin/python detect-host.py
+#
+# Torch is deliberately NOT here either. It is needed to produce the ONNX graph,
+# never to run it; server/deploy/export-model.py installs it into a throwaway
+# venv for the one-off export.
+
+-r requirements.txt
+
+# Runs the exported graph. Wheels exist for macOS and for x86_64 and aarch64
+# Linux, so any of them can be the detection host.
+onnxruntime==1.20.1
+
+# Decodes the JPEG and does the resize. On the robot this comes from apt for the
+# camera and the optical-flow odometry; a laptop serving the model needs its own.
+opencv-python-headless==4.10.0.84
+numpy==1.26.4

@@ -4,6 +4,7 @@ import { Navigate } from 'react-router-dom'
 import { ShortcutList } from '@/components/live/ShortcutList'
 import { Button } from '@/components/primitives/Button'
 import { Choice, Fact, Range, Row, Section, Toggle } from '@/components/settings/controls'
+import { DetectionHost } from '@/components/settings/DetectionHost'
 import { ModelSettings } from '@/components/settings/ModelSettings'
 import { NorthReference } from '@/components/settings/NorthReference'
 import { Page } from '@/components/shell/Page'
@@ -22,11 +23,14 @@ import { useRobot } from '@/robot/RobotProvider'
  * change what the console does come first, and the robot's own description is
  * at the end where a reference belongs.
  *
- * EVERY SETTING IS ON THE DEVICE. Nothing here is sent to the Pi and nothing
- * here changes what gets recorded: hiding a panel hides a panel, and muting a
- * class stops it being drawn rather than stopping it being detected. That is
- * what makes it safe to turn things off without weighing up whether the survey
- * suffers for it.
+ * ALMOST EVERY SETTING IS ON THE DEVICE, and none of the device ones change what
+ * gets recorded: hiding a panel hides a panel, and muting a class stops it being
+ * drawn rather than stopping it being detected. That is what makes it safe to
+ * turn things off without weighing up whether the survey suffers for it.
+ *
+ * The exception is Detection host, which is a robot setting and is kept in its
+ * own section for exactly that reason — it is the address the robot posts frames
+ * to for inference, and getting it wrong means no detections at all.
  */
 export function SettingsRoute() {
   const { client, health, telemetry, disconnect } = useRobot()
@@ -100,6 +104,8 @@ export function SettingsRoute() {
       </Section>
 
       <ModelSettings />
+
+      <DetectionHost />
 
       <Section
         title="Auto flagging"

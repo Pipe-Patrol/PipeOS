@@ -474,7 +474,6 @@ export function LiveRoute() {
             {prefs.showDetections && (
               <DetectionBoxes
                 detections={visibleDetections}
-                now={telemetry.at}
                 onFlag={runActive && !autoMode ? flagDetection : undefined}
               />
             )}

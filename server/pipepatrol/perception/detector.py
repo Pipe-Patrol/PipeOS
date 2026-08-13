@@ -21,10 +21,15 @@ import uuid
 
 log = logging.getLogger(__name__)
 
-# How long a detection stays on the overlay after the frame it came from. Long
-# enough to read at a crawl, short enough that it cannot describe a different
-# stretch of pipe.
-DETECTION_TTL_S = 6.0
+# A staleness guard, not a display duration.
+#
+# Each inference REPLACES the previous one, so in normal running a box lives
+# exactly until the next result lands and no longer. This only covers the case
+# where results stop arriving at all -- the detection host went away, the model
+# threw, the thread wedged -- where the last frame's boxes would otherwise sit
+# on the glass indefinitely, describing a stretch of pipe the robot left long
+# ago. Past this, the overlay goes empty rather than confident and wrong.
+DETECTION_STALE_S = 6.0
 
 # Never start an inference more often than this, however fast the model is.
 MIN_INFERENCE_INTERVAL_S = 0.2
@@ -102,7 +107,10 @@ class DetectionService:
         # Called for each inference to stamp detections with where the robot was.
         self._chainage_source = chainage_source
         self._lock = threading.Lock()
+        # The last inference's findings, whole, and when they were taken. Not an
+        # accumulator: see active().
         self._detections = []
+        self._detections_at = 0.0
         self._stop = threading.Event()
         self._thread = None
         self._last_ms = None
@@ -113,6 +121,26 @@ class DetectionService:
     @property
     def available(self):
         return self._detector.available
+
+    def set_backend(self, detector):
+        """Swap the model behind the service while it is running.
+
+        The console's settings screen retargets the detection host with this. It
+        starts the sampling loop if the new backend has one to start and the old
+        one did not -- a robot that booted with no host configured must begin
+        detecting the moment one is entered, without a restart.
+
+        The old backend's findings go with it. They describe frames judged by a
+        different model on a different machine, and leaving them on the overlay
+        would attribute them to the new one.
+        """
+        with self._lock:
+            self._detector = detector
+            self._detections = []
+            self._detections_at = 0.0
+            self._error = None
+            self._last_ms = None
+        self.start()
 
     def start(self):
         if self._thread is not None or not self._detector.available:
@@ -128,12 +156,18 @@ class DetectionService:
             self._thread = None
 
     def active(self, now=None):
-        """Detections young enough to still describe what is on screen."""
+        """The most recent frame's detections, or nothing if they have gone stale.
+
+        The set is whole-frame: the model judges each image alone, so the answer
+        for the newest frame is the complete answer, and mixing it with an older
+        frame's would draw the same crack twice at two positions. It is dropped
+        as a unit for the same reason -- half a frame's findings is not a
+        smaller truth, it is a different one.
+        """
         now = time.time() if now is None else now
         with self._lock:
-            self._detections = [
-                d for d in self._detections if now - d.at < DETECTION_TTL_S
-            ]
+            if self._detections and now - self._detections_at >= DETECTION_STALE_S:
+                self._detections = []
             return list(self._detections)
 
     def _run(self):
@@ -166,8 +200,14 @@ class DetectionService:
             for detection in found:
                 if detection.chainage_m is None:
                     detection.chainage_m = chainage
+
+            # Replaced, not appended -- including when the model found nothing,
+            # which is the case that matters. A frame with no defects is an
+            # answer, and letting the previous frame's boxes survive it is what
+            # turns the overlay into a pile of stale rectangles.
             with self._lock:
-                self._detections.extend(found)
+                self._detections = found
+                self._detections_at = time.time()
 
             self._stop.wait(max(0.0, MIN_INFERENCE_INTERVAL_S - elapsed))
 

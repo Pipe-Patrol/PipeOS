@@ -270,3 +270,58 @@ class TestConsoleCaching:
         cache_control = console.get("/assets/index-abc123.js").headers["cache-control"]
         assert "immutable" in cache_control
         assert "max-age=31536000" in cache_control
+
+
+class TestDetectorHost:
+    """Where the model runs is a robot setting, changeable without a redeploy.
+
+    The address the deploy baked in is a guess about a DHCP lease, and correcting
+    it must not require SSHing into a robot that is already down a pipe.
+    """
+
+    @pytest.fixture
+    def client(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(config, "DETECTOR_HOST_FILE", tmp_path / "detector-host.txt")
+        monkeypatch.setattr(config, "DETECTOR_URL", "http://deployed.local:8600")
+        with TestClient(app) as client:
+            yield client
+
+    def test_reports_the_deployed_address_when_nothing_is_overridden(self, client):
+        body = client.get("/api/detector-host").json()
+        assert body["url"] == "http://deployed.local:8600"
+        assert body["deployed"] == "http://deployed.local:8600"
+
+    def test_setting_a_host_takes_effect_immediately(self, client):
+        body = client.post("/api/detector-host", json={"url": "mymac.local"}).json()
+        assert body["ok"] is True
+        assert body["backend"] == "remote"
+        assert body["available"] is True
+        # Normalised on the way in: operators type a host, not a URL.
+        assert body["url"] == "http://mymac.local:8600"
+
+    def test_the_override_survives_a_read(self, client):
+        client.post("/api/detector-host", json={"url": "10.0.0.9:9000"})
+        assert client.get("/api/detector-host").json()["url"] == "http://10.0.0.9:9000"
+
+    def test_clearing_it_falls_back_to_the_deployed_address(self, client):
+        client.post("/api/detector-host", json={"url": "10.0.0.9"})
+        body = client.post("/api/detector-host", json={"url": ""}).json()
+        assert body["url"] == "http://deployed.local:8600"
+
+    def test_a_robot_with_no_host_anywhere_detects_nothing_and_says_why(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(config, "DETECTOR_HOST_FILE", tmp_path / "none.txt")
+        monkeypatch.setattr(config, "DETECTOR_URL", "")
+        # What the robot's systemd unit sets: never infer locally, whatever is
+        # on the SD card.
+        monkeypatch.setattr(config, "ALLOW_LOCAL_MODEL", False)
+
+        with TestClient(app) as client:
+            client.post("/api/detector-host", json={"url": ""})
+            body = client.get("/api/detector-host").json()
+            assert body["url"] == ""
+            assert body["available"] is False
+            assert "detection host" in body["error"]

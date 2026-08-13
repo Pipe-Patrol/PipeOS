@@ -24,12 +24,13 @@ lgpio==0.2.2.0
 adafruit-blinka==8.51.0
 adafruit-circuitpython-bno08x==1.2.4
 
-# The defect model, as an exported ONNX graph. Wheels exist for aarch64 Linux
-# and macOS, so the Pi and a laptop run the same file -- see
-# perception/rfdetr.py. Torch is deliberately NOT here: it is needed to produce
-# the graph, never to run it, and installing it on a Pi costs gigabytes for
-# nothing. server/deploy/export-model.py does the export, on a laptop.
-onnxruntime==1.20.1
+# NO onnxruntime, AND THAT IS THE POINT. The defect model does not run on the
+# robot: RF-DETR on a Pi 5 is seconds per frame with the cores pinned and the
+# board hot, and between the runtime and the graph it costs most of a gigabyte
+# of SD card for the privilege. The robot posts frames to a laptop instead and
+# needs nothing but the standard library to do it -- see perception/remote.py.
+#
+# To serve the model from a laptop:  pip install -r requirements-detect.txt
 
 # Tests. Safety and estimator tests need no hardware and run anywhere.
 pytest==8.3.4

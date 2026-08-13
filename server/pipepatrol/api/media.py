@@ -80,7 +80,14 @@ async def post_detect(
     """
     if not robot.detections.available:
         return JSONResponse(
-            {"error": "no detection model is installed", **robot.detections.status()},
+            {
+                # The model lives on a laptop now, so "not installed" would send
+                # somebody to the robot. The backend's own status says which end
+                # is actually missing.
+                "error": robot.detections.status().get("error")
+                or "no detection host configured",
+                **robot.detections.status(),
+            },
             status_code=503,
         )
 
