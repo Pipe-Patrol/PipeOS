@@ -4,6 +4,7 @@ import { FinishRunPrompt } from '@/components/live/FinishRunPrompt'
 import { NoRunOverlay } from '@/components/live/NoRunOverlay'
 import { RegionDrawer } from '@/components/live/RegionDrawer'
 import { RunSetupPanel, type RunDraft } from '@/components/live/runsetup/RunSetupPanel'
+import { GamepadGuideOverlay } from '@/components/live/GamepadGuideOverlay'
 import { ShortcutOverlay } from '@/components/live/ShortcutOverlay'
 import { VideoFeed } from '@/components/live/VideoFeed'
 import { ZoomControl, clampZoom } from '@/components/live/ZoomControl'
@@ -96,6 +97,9 @@ export function LiveRoute() {
    */
   const [prefill, setPrefill] = useState<{ code?: string; note?: string } | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  // The pad diagram on its own. Separate from the shortcut sheet because the
+  // right stick opens exactly this and nothing else.
+  const [showPadGuide, setShowPadGuide] = useState(false)
   const [starting, setStarting] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
   const [finishing, setFinishing] = useState(false)
@@ -220,6 +224,9 @@ export function LiveRoute() {
   // Driving is locked while any of these has the screen — including drawing,
   // where the operator is pointing at pipe wall rather than watching where the
   // robot is going, and a stray key would move it out from under the box.
+  // showPadGuide is deliberately NOT in here. It is a reference an operator
+  // opens mid-crawl, and locking driving behind it would also disable the pad
+  // handling that closes it -- the button would open a panel it could not shut.
   const modalOpen = showShortcuts || setupOpen || drawingRegion !== null || finishing
 
   const startDrawingRegion = useCallback((className: string, label: string) => {
@@ -380,7 +387,7 @@ export function LiveRoute() {
     onLightsBrighter: () => setLed(Math.min(1, Math.round((ledLevel + 0.2) * 10) / 10)),
     onLightsDarker: () => setLed(Math.max(0, Math.round((ledLevel - 0.2) * 10) / 10)),
     onResetView: () => setZoom(1),
-    onShowGuide: () => setShowShortcuts(true),
+    onShowGuide: () => setShowPadGuide((open) => !open),
     onReturnHome: () => home.engage('manual'),
   }
 
@@ -766,6 +773,8 @@ export function LiveRoute() {
       )}
 
       {showShortcuts && <ShortcutOverlay onClose={() => setShowShortcuts(false)} />}
+
+      {showPadGuide && <GamepadGuideOverlay onClose={() => setShowPadGuide(false)} />}
     </div>
   )
 }

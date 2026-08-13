@@ -35,10 +35,20 @@ const FOCUSABLE = [
   '[role="button"]:not([aria-disabled="true"])',
 ].join(',')
 
-/** The dialog that owns the screen, or the document. */
+/**
+ * The panel that owns the screen, or the document.
+ *
+ * Marked with `data-pad-scope` rather than sniffed for `role="dialog"`: this
+ * console has no dialogs. Its panels are plain positioned divs, so looking for
+ * a dialog found nothing, every scope was the whole document, and circle fell
+ * through to flagging while a form was open. The attribute is explicit about
+ * which containers are panels, which is the thing that was being guessed at.
+ */
 function scope(): ParentNode {
-  const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"], dialog[open]')
-  return dialogs.length > 0 ? dialogs[dialogs.length - 1] : document
+  const panels = document.querySelectorAll<HTMLElement>(
+    '[data-pad-scope], [role="dialog"], dialog[open]',
+  )
+  return panels.length > 0 ? panels[panels.length - 1] : document
 }
 
 function candidates(): HTMLElement[] {
@@ -85,7 +95,25 @@ export function activateFocused(): boolean {
   // way, so circle never falls through to flagging while a dropdown has focus.
   if (active instanceof HTMLSelectElement) return true
 
+  // Where it was, so focus can be put back.
+  //
+  // WHY. Clicking a control usually re-renders the panel around it, and React
+  // replaces the DOM node rather than mutating it. The node that had focus is
+  // then detached, focus falls to <body>, and the next shoulder press starts
+  // counting from the top — which reads as circle having confirmed AND moved
+  // the selection on. It never moved: it lost it.
+  const index = candidates().indexOf(active)
   active.click()
+
+  // After the click's re-render. A microtask lands before React commits, which
+  // is too early for the replacement node to exist.
+  requestAnimationFrame(() => {
+    if (document.activeElement && document.activeElement !== document.body) return
+    const items = candidates()
+    if (items.length === 0) return
+    items[Math.min(index < 0 ? 0 : index, items.length - 1)]?.focus()
+  })
+
   return true
 }
 
