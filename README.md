@@ -85,8 +85,9 @@ redeploying in **Settings → Detection host**.
 torch, and the one that has been down a pipe. `rfdetr-torch` is the newer
 checkpoint under torch, with an optional clean-pipe bank that flags conditions
 outside the seven classes as `UNKNOWN`; it is not QC'd yet. Switch between them
-in **Settings → Detection host → Model**. The button switches the laptop, not
-the robot, and one that is not installed is shown greyed with the reason.
+in **Settings → Detection host → Model**. Installing one is copying its `.pth`
+into `server/model/` — no restart, no redeploy — and the button switches your
+laptop, not the robot.
 
 Without a reachable host the robot still drives, records and logs defects by
 hand; it just detects nothing. See [MODEL.md](MODEL.md) for the class list and

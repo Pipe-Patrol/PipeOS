@@ -6,37 +6,108 @@ machine that had them. What is tested is that choosing badly is survivable,
 because the chooser is a button an operator presses mid-run.
 """
 
+import inspect
+
 from pipepatrol.perception import catalogue
 
 
 class TestCatalogue:
-    def test_every_entry_can_be_built(self):
-        """Whatever is installed, building an entry returns a usable backend."""
-        for entry in catalogue.CATALOGUE:
-            detector = catalogue.build(entry["id"])
-            assert hasattr(detector, "infer")
-            assert isinstance(detector.available, bool)
+    def test_every_entry_satisfies_the_backend_contract(self, monkeypatch, tmp_path):
+        """name, available, error, and infer(jpeg, min_confidence).
+
+        Checked with each model both absent AND present, because they take
+        different code paths and the interesting one is present: a backend
+        missing `error` only breaks once somebody installs it, so a catalogue
+        that is empty on the test machine proves nothing.
+        """
+        monkeypatch.setattr(catalogue, "MODEL_DIR", tmp_path)
+
+        for present in (False, True):
+            if present:
+                (tmp_path / "checkpoint.pth").write_bytes(b"stand-in")
+                (tmp_path / "bank.npz").write_bytes(b"stand-in")
+
+            for entry in catalogue.CATALOGUE:
+                detector = catalogue.build(entry["id"])
+                assert isinstance(detector.name, str)
+                assert isinstance(detector.available, bool)
+                # The one that was missing: read, not just present, because a
+                # property that raises passes hasattr in the wrong way.
+                assert detector.error is None or isinstance(detector.error, str)
+
+                signature = inspect.signature(detector.infer)
+                assert "min_confidence" in signature.parameters
+
+    def test_describe_survives_a_model_that_is_installed(self, monkeypatch, tmp_path):
+        """What actually broke: describe() reads .error off every backend."""
+        monkeypatch.setattr(catalogue, "MODEL_DIR", tmp_path)
+        (tmp_path / "checkpoint.pth").write_bytes(b"stand-in")
+
+        entries = catalogue.describe("rfdetr-onnx", catalogue.build("rfdetr-onnx"))
+
+        torch_entry = next(e for e in entries if e["id"] == "rfdetr-torch")
+        assert torch_entry["available"] is True
 
     def test_an_unknown_id_is_refused_not_raised(self):
         detector = catalogue.build("something-newton-added")
         assert detector.available is False
         assert "something-newton-added" in detector.error
 
-    def test_the_torch_model_says_what_it_is_missing(self, monkeypatch):
+    def test_the_torch_model_says_where_to_put_the_checkpoint(self, monkeypatch, tmp_path):
+        """The instruction is "drop a file here", not "export a variable"."""
         monkeypatch.delenv("PIPEPATROL_WEIGHTS", raising=False)
-        detector = catalogue.build("rfdetr-torch")
-        assert detector.available is False
-        # Actionable: the operator can go and set it.
-        assert "PIPEPATROL_WEIGHTS" in detector.error
+        monkeypatch.setattr(catalogue, "MODEL_DIR", tmp_path)
 
-    def test_a_checkpoint_that_is_not_there_is_reported(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("PIPEPATROL_WEIGHTS", str(tmp_path / "nothing.pth"))
         detector = catalogue.build("rfdetr-torch")
+
         assert detector.available is False
-        assert "nothing.pth" in detector.error
+        assert str(tmp_path) in detector.error
+
+    def test_a_checkpoint_dropped_in_is_found_with_no_restart(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("PIPEPATROL_WEIGHTS", raising=False)
+        monkeypatch.setattr(catalogue, "MODEL_DIR", tmp_path)
+        assert catalogue.find_weights() is None
+
+        (tmp_path / "checkpoint_best_total.pth").write_bytes(b"not really a checkpoint")
+
+        # Nothing was reloaded, restarted or re-exported between these two lines,
+        # which is the whole point: installing a model is copying a file.
+        assert catalogue.find_weights().name == "checkpoint_best_total.pth"
+
+    def test_the_newest_checkpoint_wins(self, monkeypatch, tmp_path):
+        """Two in the folder means the one just copied in is the one meant."""
+        import os
+        import time
+
+        monkeypatch.delenv("PIPEPATROL_WEIGHTS", raising=False)
+        monkeypatch.setattr(catalogue, "MODEL_DIR", tmp_path)
+
+        old = tmp_path / "aaa-old.pth"
+        new = tmp_path / "zzz-new.pth"
+        old.write_bytes(b"old")
+        new.write_bytes(b"new")
+        os.utime(old, (time.time() - 9000, time.time() - 9000))
+
+        assert catalogue.find_weights().name == "zzz-new.pth"
+
+    def test_an_explicit_path_still_wins(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("PIPEPATROL_WEIGHTS", str(tmp_path / "nothing.pth"))
+        monkeypatch.setattr(catalogue, "MODEL_DIR", tmp_path)
+        (tmp_path / "ignored.pth").write_bytes(b"x")
+
+        assert catalogue.find_weights() is None
+
+    def test_the_anomaly_bank_is_optional(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("PIPEPATROL_ANOMALY_BANK", raising=False)
+        monkeypatch.setattr(catalogue, "MODEL_DIR", tmp_path)
+        assert catalogue.find_anomaly_bank() is None
+
+        (tmp_path / "clean-pipe.npz").write_bytes(b"x")
+        assert catalogue.find_anomaly_bank().endswith("clean-pipe.npz")
 
     def test_the_default_is_honest_when_nothing_is_installed(self, monkeypatch, tmp_path):
         monkeypatch.delenv("PIPEPATROL_WEIGHTS", raising=False)
+        monkeypatch.setattr(catalogue, "MODEL_DIR", tmp_path)
         monkeypatch.setenv("PIPEPATROL_MODEL", str(tmp_path / "nothing.onnx"))
         import importlib
 

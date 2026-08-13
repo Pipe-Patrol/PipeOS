@@ -22,8 +22,48 @@ robot's own choice is one thing -- which host -- and its backend is always
 
 import logging
 import os
+from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+# Where models live on the machine serving them. The ONNX graph is already here;
+# a torch checkpoint goes in beside it.
+#
+# FOUND, NOT CONFIGURED. Somebody sent you a checkpoint: the whole of installing
+# it should be putting the file in a folder. An environment variable means an
+# operator cannot install a model without restarting the server from a shell
+# with the right thing exported, which is a deployment step masquerading as a
+# choice -- and the console has a button for the choice.
+MODEL_DIR = Path(__file__).resolve().parents[2] / "model"
+
+
+def find_weights():
+    """The torch checkpoint, if one has been dropped in. Newest wins.
+
+    Newest rather than first alphabetically: checkpoints arrive named after
+    whatever produced them, and the one you just copied in is the one you meant.
+    PIPEPATROL_WEIGHTS still overrides, for a checkpoint kept elsewhere.
+    """
+    override = os.environ.get("PIPEPATROL_WEIGHTS")
+    if override:
+        path = Path(override).expanduser()
+        return path if path.is_file() else None
+    return _newest(MODEL_DIR.glob("*.pth"))
+
+
+def find_anomaly_bank():
+    """The clean-pipe bank, if one is present. Optional -- the model runs without it."""
+    override = os.environ.get("PIPEPATROL_ANOMALY_BANK")
+    if override:
+        path = Path(override).expanduser()
+        return str(path) if path.is_file() else None
+    found = _newest(MODEL_DIR.glob("*.npz"))
+    return str(found) if found else None
+
+
+def _newest(paths):
+    files = [p for p in paths if p.is_file()]
+    return max(files, key=lambda p: p.stat().st_mtime) if files else None
 
 # The id the console sends, in order of preference. First available wins when
 # nothing has been chosen.
@@ -62,16 +102,14 @@ def build(model_id):
     if model_id == "rfdetr-torch":
         from pipepatrol.perception.model import RFDetrDetector
 
-        weights = os.environ.get("PIPEPATROL_WEIGHTS")
+        weights = find_weights()
         if not weights:
             return NullDetector(
-                note="rfdetr-torch needs PIPEPATROL_WEIGHTS pointing at the .pth checkpoint"
+                note=f"no .pth checkpoint in {MODEL_DIR} — drop one in and press this again"
             )
-        detector = RFDetrDetector(
-            weights=weights, anomaly_bank=os.environ.get("PIPEPATROL_ANOMALY_BANK")
-        )
+        detector = RFDetrDetector(weights=str(weights), anomaly_bank=find_anomaly_bank())
         if not detector.available:
-            return NullDetector(note=f"no checkpoint at {weights}")
+            return NullDetector(note=f"could not read {weights.name}")
         return detector
 
     return NullDetector(note=f"unknown model {model_id!r}")
@@ -101,11 +139,12 @@ def describe(model_id, detector):
     """
     entries = []
     for entry in CATALOGUE:
-        if entry["id"] == model_id:
-            available, error = detector.available, detector.error
-        else:
-            candidate = build(entry["id"])
-            available, error = candidate.available, candidate.error
+        target = detector if entry["id"] == model_id else build(entry["id"])
+        # getattr, not attribute access: this walks every backend in the
+        # catalogue including ones added later, and a missing `error` here
+        # would take the whole settings screen down rather than showing one
+        # model as unexplained.
+        available, error = target.available, getattr(target, "error", None)
         entries.append(
             {**entry, "available": available, "error": error, "selected": entry["id"] == model_id}
         )

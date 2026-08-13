@@ -8,7 +8,15 @@ between them in **Settings → Detection host → Model**:
 | id | what it is | needs |
 | -- | ---------- | ----- |
 | `rfdetr-onnx` | The exported graph. Seven classes, quick, no torch. **The one that has been down a pipe.** | `onnxruntime`, `server/model/*.onnx` |
-| `rfdetr-torch` | The same checkpoint under torch, plus an optional clean-pipe memory bank that raises `UNKNOWN` for conditions outside the seven. **Not yet QC'd.** | `rfdetr`, `torch`, `PIPEPATROL_WEIGHTS` |
+| `rfdetr-torch` | The same checkpoint under torch, plus an optional clean-pipe memory bank that raises `UNKNOWN` for conditions outside the seven. **Not yet QC'd.** | `rfdetr`, `torch`, and a `.pth` in `server/model/` |
+
+### Installing one is copying a file
+
+Drop the `.pth` into `server/model/` (and the anomaly bank's `.npz` beside it,
+if there is one) on whatever machine runs `detect-host.py`. Nothing to export,
+nothing to restart: the catalogue rescans on every read, so the greyed-out entry
+becomes pressable — **Rescan** on the settings screen if it is already open.
+`PIPEPATROL_WEIGHTS` still overrides, for a checkpoint kept elsewhere.
 
 They are not interchangeable enough to choose automatically — which is right
 depends on what the run is for — so an operator chooses. The catalogue lives in

@@ -96,7 +96,7 @@ class NullDetector:
     def __init__(self, note=None):
         self.error = note
 
-    def infer(self, jpeg):  # noqa: ARG002 - the signature is the contract
+    def infer(self, jpeg, min_confidence=None):  # noqa: ARG002 - the signature IS the contract
         return []
 
 
@@ -266,13 +266,7 @@ class DetectionService:
         # Marked before the inference, not after: a slow model must not let the
         # camera loop start a second one while this is still running.
         self._supplied_at = time.monotonic()
-        # Not every backend takes a floor -- NullDetector does not -- so it is
-        # only passed when asked for.
-        found = (
-            self._detector.infer(jpeg, min_confidence)
-            if min_confidence is not None
-            else self._detector.infer(jpeg)
-        )
+        found = self._detector.infer(jpeg, min_confidence)
         self._supplied_at = time.monotonic()
         chainage = self._chainage_source() if self._chainage_source else None
         for detection in found:
