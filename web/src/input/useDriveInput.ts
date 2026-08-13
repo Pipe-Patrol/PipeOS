@@ -117,7 +117,18 @@ export interface GamepadActions {
   onFocusNext?: () => void
   /** R3. The controller map. */
   onShowGuide?: () => void
+  /** Options, held. Engages a return. */
+  onReturnHome?: () => void
 }
+
+/**
+ * How long Options must be held before a return engages.
+ *
+ * Held rather than tapped because it is the only control on the pad that drives
+ * the robot somewhere on its own. Everything else is undone by pressing it
+ * again; a return that fired from a thumb catching a button is not.
+ */
+const RETURN_HOLD_MS = 1000
 
 export interface DriveInputOptions {
   client: RobotClient | null
@@ -290,6 +301,16 @@ export function useDriveInput({
   // the next press. Kept in the same state as the keyboard latch so a throttle
   // locked with the stick is released by Escape, by a drive key, and by every
   // safety release below -- exactly as one locked with Shift is.
+  const returnHeld = enabled && gamepad.held.includes(GAMEPAD_BUTTONS.OPTIONS)
+  useEffect(() => {
+    if (!returnHeld) return
+    const timer = window.setTimeout(
+      () => actionsRef.current?.onReturnHome?.(),
+      RETURN_HOLD_MS,
+    )
+    return () => window.clearTimeout(timer)
+  }, [returnHeld])
+
   const stickPressed = gamepad.pressed.includes(GAMEPAD_BUTTONS.L3)
   useEffect(() => {
     if (!enabled || !stickPressed) return

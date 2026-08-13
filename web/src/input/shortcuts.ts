@@ -52,6 +52,7 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: 'Triangle △', action: 'Start or stop recording', group: 'Gamepad' },
   { keys: 'L1 / R1', action: 'Move through a panel · change a dropdown', group: 'Gamepad' },
   { keys: 'Create', action: 'Reset the zoom', group: 'Gamepad' },
+  { keys: 'Options (hold)', action: 'Return home · held, not tapped', group: 'Gamepad' },
 
   { keys: 'D D', action: 'Demo day mode on or off', group: 'Demo day' },
   { keys: '← →', action: 'Switch footage, in demo day mode', group: 'Demo day' },

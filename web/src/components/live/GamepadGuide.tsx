@@ -82,8 +82,7 @@ export function GamepadGuide() {
           <path d="M84 28 q22 -14 46 -8" />
           <path d="M316 28 q-22 -14 -46 -8" />
 
-          {/* Create. Options is drawn but unlabelled -- it is deliberately
-              unbound, and labelling it would imply an action that is not there. */}
+          {/* Create and Options */}
           <path d="M168 84 v14" />
           <path d="M232 84 v14" />
         </g>
@@ -108,6 +107,7 @@ export function GamepadGuide() {
           <path d="M150 190 v22 h-40" />
           <path d="M250 190 v22 h40" />
           <path d="M168 84 v-18 h-42" />
+          <path d="M232 84 v-18 h42" />
           <path d="M337 102 h30" />
         </g>
 
@@ -138,6 +138,9 @@ export function GamepadGuide() {
           </text>
 
           <text x="122" y="69" textAnchor="end">Create · Reset</text>
+          {/* One line, not two: a second line here lands on the triangle
+              button, which sits at y=78. */}
+          <text x="278" y="69">Options · Home (hold)</text>
 
           {FACE.map((button, index) => (
             <text key={button.label} x={371} y={80 + index * 15}>

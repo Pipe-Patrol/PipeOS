@@ -381,6 +381,7 @@ export function LiveRoute() {
     onLightsDarker: () => setLed(Math.max(0, Math.round((ledLevel - 0.2) * 10) / 10)),
     onResetView: () => setZoom(1),
     onShowGuide: () => setShowShortcuts(true),
+    onReturnHome: () => home.engage('manual'),
   }
 
   const drive = useDriveInput({
