@@ -46,7 +46,9 @@ class Robot:
         self.store = store or RunStore()
         self.recorder = Recorder(self.camera, self.store)
         self.detections = DetectionService(
-            self.camera, chainage_source=lambda: self.odometry.status()["chainage_m"]
+            self.camera,
+            detector=build_detector(),
+            chainage_source=lambda: self.odometry.status()["chainage_m"],
         )
 
         self._active_run_id = None
