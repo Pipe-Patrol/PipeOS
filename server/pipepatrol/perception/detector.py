@@ -80,6 +80,7 @@ class DetectionService:
         self._chainage_source = chainage_source
         self._lock = threading.Lock()
         self._detections = []
+        self._observations = []
         self._stop = threading.Event()
         self._thread = None
         self._last_ms = None
@@ -111,6 +112,18 @@ class DetectionService:
             ]
             return list(self._detections)
 
+    def observations(self):
+        """Every detection of the pass, for reasoning rather than the overlay."""
+        from pipepatrol.reasoning import Observation
+
+        with self._lock:
+            return [Observation.from_detection(d) for d in self._observations]
+
+    def clear_observations(self):
+        """Start a fresh pass."""
+        with self._lock:
+            self._observations = []
+
     def _run(self):
         while not self._stop.is_set():
             started = time.monotonic()
@@ -137,6 +150,7 @@ class DetectionService:
                     detection.chainage_m = chainage
             with self._lock:
                 self._detections.extend(found)
+                self._observations.extend(found)
 
             self._stop.wait(max(0.0, MIN_INFERENCE_INTERVAL_S - elapsed))
 
