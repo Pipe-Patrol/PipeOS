@@ -64,12 +64,12 @@ else depends on the model's naming.
 | joint offset | JD |
 | obstruction | OB |
 | root intrusion | RO |
-| utility intrusion | OB |
+| utility intrusion | UT |
 
-Utility intrusion lands on OB because `defects.ts` has no code for it. Another
-utility bored through the pipe is literally an object restricting the bore, so
-it is not wrong, but "obstacle" undersells a gas line through a sewer. Worth
-its own code when there is time.
+`UT` is grouped Structural in `defects.ts` rather than Service, because the
+defining fact is that something pierced the wall, not that the bore is
+narrower, and that is the part that matters when someone puts a cutter down the
+line.
 
 The checkpoint reports eight classes on load, not seven. The extra one is a
 dummy category the export tool writes at index 0 and it never predicts. The
@@ -84,8 +84,8 @@ Inference is one to two seconds per frame on a laptop CPU, slower on a Pi.
 samples whatever frame is current when the last one finished, and detections
 carry the moment they were made.
 
-Confidence is thresholded at 0.30 rather than the usual 0.50, set by
-`PIPEPATROL_CONF_THRESHOLD`. Cracks are thin and the model is cautious about
+Confidence is thresholded at 0.30 rather than the usual 0.50, a constant in
+`perception/model.py`. Cracks are thin and the model is cautious about
 them, so a normal threshold misses most of them while a lower one costs little,
 since precision on cracks stays around 0.70 either way.
 
