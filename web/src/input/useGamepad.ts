@@ -21,9 +21,19 @@ export const GAMEPAD_BUTTONS = {
   B: 1,
   X: 2,
   Y: 3,
+  LB: 4,
+  RB: 5,
+  BACK: 8,
+  START: 9,
   DPAD_UP: 12,
   DPAD_DOWN: 13,
+  DPAD_LEFT: 14,
+  DPAD_RIGHT: 15,
 } as const
+
+// The triggers (6, 7) are deliberately unmapped. They are the two controls an
+// operator brushes without meaning to while holding the pad, and everything
+// worth reaching for fits on the faces and shoulders without them.
 
 export interface GamepadSnapshot {
   connected: boolean
@@ -32,9 +42,23 @@ export interface GamepadSnapshot {
   throttle: number
   /** Buttons pressed since the previous poll — edges, not held state. */
   pressed: number[]
+  /**
+   * Buttons down right now.
+   *
+   * Separate from `pressed` because one control needs it: Return to home is
+   * held rather than tapped, so that the button which sends the robot back up
+   * the pipe cannot be the one somebody catches with a thumb.
+   */
+  held: number[]
 }
 
-const IDLE: GamepadSnapshot = { connected: false, id: null, throttle: 0, pressed: [] }
+const IDLE: GamepadSnapshot = {
+  connected: false,
+  id: null,
+  throttle: 0,
+  pressed: [],
+  held: [],
+}
 
 export function useGamepad(): GamepadSnapshot {
   const [snapshot, setSnapshot] = useState<GamepadSnapshot>(IDLE)
@@ -54,8 +78,11 @@ export function useGamepad(): GamepadSnapshot {
       }
 
       const pressed: number[] = []
+      const held: number[] = []
       pad.buttons.forEach((button, index) => {
-        if (button.pressed && !previousButtons.current[index]) pressed.push(index)
+        if (!button.pressed) return
+        held.push(index)
+        if (!previousButtons.current[index]) pressed.push(index)
       })
       previousButtons.current = pad.buttons.map((button) => button.pressed)
 
@@ -64,6 +91,7 @@ export function useGamepad(): GamepadSnapshot {
         id: pad.id,
         throttle: readThrottle(pad),
         pressed,
+        held,
       }
 
       // Returning the same object when nothing changed keeps a resting
@@ -85,8 +113,13 @@ function unchanged(a: GamepadSnapshot, b: GamepadSnapshot): boolean {
     a.id === b.id &&
     a.throttle === b.throttle &&
     a.pressed.length === 0 &&
-    b.pressed.length === 0
+    b.pressed.length === 0 &&
+    sameButtons(a.held, b.held)
   )
+}
+
+function sameButtons(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
 function firstConnectedPad(): Gamepad | null {

@@ -88,17 +88,44 @@ function rememberLockLearned(): void {
   }
 }
 
+/**
+ * Everything the pad can do besides drive.
+ *
+ * Passed in rather than performed here: this hook owns the throttle, and a
+ * hook that also toggled lights and deleted nothing in particular would be the
+ * place every future control got bolted onto. The live screen already owns all
+ * of these; this only decides which button reaches them.
+ */
+export interface GamepadActions {
+  onSnapshot?: () => void
+  onFlag?: () => void
+  onToggleLights?: () => void
+  onToggleRecording?: () => void
+  onZoomIn?: () => void
+  onZoomOut?: () => void
+  onBrighter?: () => void
+  onDarker?: () => void
+  onResetView?: () => void
+  onReturnHome?: () => void
+}
+
+/** How long Start must be held before a return engages. */
+const RETURN_HOLD_MS = 1000
+
 export interface DriveInputOptions {
   client: RobotClient | null
   /** False while a modal owns the keyboard, or the link is down. */
   enabled: boolean
   onSnapshot?: () => void
+  /** The rest of the pad. Omitted controls simply do nothing. */
+  actions?: GamepadActions
 }
 
 export function useDriveInput({
   client,
   enabled,
   onSnapshot,
+  actions,
 }: DriveInputOptions): DriveInput {
   const [keys, setKeys] = useState({ forward: false, reverse: false })
   const [locked, setLocked] = useState<DriveDirection>(null)
@@ -193,10 +220,68 @@ export function useDriveInput({
 
   // --- gamepad buttons ---
 
+  // Held in a ref so the effect below depends only on the button edges. With
+  // the callbacks in the dependency list it would re-run on every render of the
+  // driving screen, which is ten times a second, and fire each press again.
+  const actionsRef = useRef(actions)
+  useEffect(() => {
+    actionsRef.current = actions
+  })
+
   useEffect(() => {
     if (!enabled || gamepad.pressed.length === 0) return
-    if (gamepad.pressed.includes(GAMEPAD_BUTTONS.A)) onSnapshotRef.current?.()
+    const pad = actionsRef.current ?? {}
+
+    for (const button of gamepad.pressed) {
+      switch (button) {
+        case GAMEPAD_BUTTONS.A:
+          onSnapshotRef.current?.()
+          break
+        case GAMEPAD_BUTTONS.B:
+          pad.onFlag?.()
+          break
+        case GAMEPAD_BUTTONS.X:
+          pad.onToggleLights?.()
+          break
+        case GAMEPAD_BUTTONS.Y:
+          pad.onToggleRecording?.()
+          break
+        case GAMEPAD_BUTTONS.RB:
+          pad.onZoomIn?.()
+          break
+        case GAMEPAD_BUTTONS.LB:
+          pad.onZoomOut?.()
+          break
+        case GAMEPAD_BUTTONS.DPAD_RIGHT:
+          pad.onBrighter?.()
+          break
+        case GAMEPAD_BUTTONS.DPAD_LEFT:
+          pad.onDarker?.()
+          break
+        case GAMEPAD_BUTTONS.BACK:
+          pad.onResetView?.()
+          break
+        default:
+          break
+      }
+    }
   }, [enabled, gamepad.pressed])
+
+  // Start engages a return home, and is HELD rather than tapped.
+  //
+  // It is the only control on the pad that drives the robot somewhere on its
+  // own, so it is the one that must not fire from a thumb catching a button
+  // while reaching for the stick. Everything else here is recoverable by
+  // pressing it again; this is not.
+  const returnHeld = enabled && gamepad.held.includes(GAMEPAD_BUTTONS.START)
+  useEffect(() => {
+    if (!returnHeld) return
+    const timer = window.setTimeout(
+      () => actionsRef.current?.onReturnHome?.(),
+      RETURN_HOLD_MS,
+    )
+    return () => window.clearTimeout(timer)
+  }, [returnHeld])
 
   // --- hint ---
 

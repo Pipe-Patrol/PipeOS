@@ -5,6 +5,7 @@ import { GeoTraceMap } from '@/components/map/GeoTraceMap'
 import { PathMap } from '@/components/map/PathMap'
 import { DefectBox } from '@/components/overlay/DefectBox'
 import { EmptyState } from '@/components/primitives/EmptyState'
+import { readError } from '@/lib/errors'
 import { ExportMenu } from '@/components/rundetail/ExportMenu'
 import { PreviewRow } from '@/components/rundetail/PreviewRow'
 import { RunProfile } from '@/components/rundetail/RunProfile'
@@ -46,7 +47,59 @@ import { useRun } from '@/robot/useRun'
 export function RunDetailRoute() {
   const { runId } = useParams<{ runId: string }>()
   const { client } = useRobot()
-  const { run, loading, error } = useRun(client, runId ?? null)
+  const { run, loading, error, refresh } = useRun(client, runId ?? null)
+  const [deleting, setDeleting] = useState(false)
+
+  /**
+   * Delete video, and nothing else.
+   *
+   * Footage is almost all of what a run weighs, and almost never the part
+   * anybody is asked for -- the defects, the stills and the path stay, so this
+   * frees the card without costing the inspection record. That asymmetry is why
+   * it is confirmed rather than undoable: there is no undo on an SD card, and
+   * an accidental press should cost a sentence, not a survey.
+   */
+  const deleteRecording = async (recordingId: string, number: number) => {
+    if (!client || !runId) return
+    if (!window.confirm(`Delete clip ${number}? The video file is removed for good.`)) {
+      return
+    }
+    setDeleting(true)
+    try {
+      await client.request(`/api/runs/${runId}/recordings/${recordingId}`, {
+        method: 'DELETE',
+      })
+      setSelection(null)
+      await refresh()
+    } catch (caught) {
+      window.alert(readError(caught, 'could not delete the clip'))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const deleteRecordings = async () => {
+    if (!client || !runId || !run) return
+    const count = run.recordings.length
+    if (
+      !window.confirm(
+        `Delete all ${count} clip${count === 1 ? '' : 's'} from this run? ` +
+          'The video files are removed for good. Defects and captures are kept.',
+      )
+    ) {
+      return
+    }
+    setDeleting(true)
+    try {
+      await client.request(`/api/runs/${runId}/recordings`, { method: 'DELETE' })
+      setSelection(null)
+      await refresh()
+    } catch (caught) {
+      window.alert(readError(caught, 'could not delete the video'))
+    } finally {
+      setDeleting(false)
+    }
+  }
   const [selection, setSelection] = useState<Selection | null>(null)
 
   if (!client) return <Navigate to="/connect" replace />
@@ -172,6 +225,16 @@ export function RunDetailRoute() {
         title="Recordings"
         count={run.recordings.length}
         empty="Nothing was recorded on this run"
+        action={
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={() => void deleteRecordings()}
+            className="rounded-sm px-2 py-1 text-[11.5px] text-ink-400 transition-colors hover:bg-white/8 hover:text-state-fault-signal disabled:opacity-40"
+          >
+            {deleting ? 'Deleting…' : 'Delete all video'}
+          </button>
+        }
       >
         {run.recordings.map((recording, index) => (
           <Card
@@ -182,6 +245,8 @@ export function RunDetailRoute() {
                 selection?.id === recording.id ? null : selectRecording(recording),
               )
             }
+            onDelete={() => void deleteRecording(recording.id, index + 1)}
+            deleteLabel={`Delete clip ${index + 1}`}
             label={`Clip ${index + 1}`}
             caption={`${format.duration(recording.duration_s)} · ${format.metres(
               recording.chainage_start_m,

@@ -100,6 +100,48 @@ async def delete_run(run_id: str, robot=Depends(get_robot)):
     return {"ok": True}
 
 
+def _recording_in_progress(robot, run_id):
+    """Is the recorder writing into this run right now?
+
+    A clip being written has an open file handle and no entry in run.json yet,
+    so deleting "all" would miss it and deleting the run's directory underneath
+    it would leave the recorder writing into nothing. Refused rather than raced.
+    """
+    return robot.recorder.status().get("active") and run_id == robot.active_run_id
+
+
+@router.delete("/{run_id}/recordings")
+async def delete_recordings(run_id: str, robot=Depends(get_robot)):
+    """Every clip in the run. The run, its defects and its stills stay.
+
+    Video is almost all of what a run weighs, so this is the button that gets a
+    full SD card back -- without throwing away the inspection record, which is
+    the part anybody is going to be asked for.
+    """
+    if _recording_in_progress(robot, run_id):
+        return JSONResponse(
+            {"error": "stop recording before deleting this run's video"},
+            status_code=409,
+        )
+
+    count, freed = robot.store.delete_recordings(run_id)
+    return {"ok": True, "deleted": count, "freed_bytes": freed}
+
+
+@router.delete("/{run_id}/recordings/{recording_id}")
+async def delete_recording(run_id: str, recording_id: str, robot=Depends(get_robot)):
+    if _recording_in_progress(robot, run_id):
+        return JSONResponse(
+            {"error": "stop recording before deleting this run's video"},
+            status_code=409,
+        )
+
+    deleted, freed = robot.store.delete_recording(run_id, recording_id)
+    if not deleted:
+        return JSONResponse({"error": "no such recording"}, status_code=404)
+    return {"ok": True, "deleted": 1, "freed_bytes": freed}
+
+
 @router.post("/{run_id}/end")
 async def end_run(run_id: str, robot=Depends(get_robot)):
     if run_id != robot.active_run_id:

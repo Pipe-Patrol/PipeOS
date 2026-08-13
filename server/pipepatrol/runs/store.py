@@ -146,6 +146,69 @@ class RunStore:
             self._write(run)
             return recording
 
+    def delete_recording(self, run_id, recording_id):
+        """Drop one clip: its entry, its video, and its frame index.
+
+        Video is almost all of what a run weighs -- a few minutes of MJPEG
+        outruns every snapshot, defect and path point put together -- so this is
+        the one delete that gets an SD card out of trouble. The run itself, its
+        defects and its stills all survive, because the footage is the bulky
+        part and rarely the part being reported on.
+
+        Returns (deleted, freed_bytes). `deleted` is False for a clip that is
+        not there, which a second click on a slow link would otherwise report
+        as a failure.
+        """
+        with self._lock:
+            run = self._read(run_id)
+            if run is None:
+                return False, 0
+
+            match = next((r for r in run.recordings if r.id == recording_id), None)
+            if match is None:
+                return False, 0
+
+            freed = self._unlink_clip(run_id, match)
+            run.recordings = [r for r in run.recordings if r.id != recording_id]
+            self._write(run)
+            log.info("recording deleted: %s/%s (%d bytes)", run_id, recording_id, freed)
+            return True, freed
+
+    def delete_recordings(self, run_id):
+        """Every clip in the run. Returns (count, freed_bytes)."""
+        with self._lock:
+            run = self._read(run_id)
+            if run is None or not run.recordings:
+                return 0, 0
+
+            freed = sum(self._unlink_clip(run_id, r) for r in run.recordings)
+            count = len(run.recordings)
+            run.recordings = []
+            self._write(run)
+            log.info("%d recordings deleted: %s (%d bytes)", count, run_id, freed)
+            return count, freed
+
+    def _unlink_clip(self, run_id, recording):
+        """Remove a clip's files. Missing ones are fine -- the goal is absence.
+
+        Deleting the files BEFORE rewriting run.json would strand them if the
+        write then failed; deleting after means a crash in between leaves files
+        with no entry, which costs space but never shows an operator a clip that
+        will not play. Space is the cheaper failure.
+        """
+        directory = self.run_dir(run_id)
+        freed = 0
+        for name in (recording.file, recording.index_file):
+            if not name:
+                continue
+            path = directory / name
+            try:
+                freed += path.stat().st_size
+                path.unlink()
+            except OSError:
+                continue
+        return freed
+
     def delete_defect(self, run_id, defect_id):
         with self._lock:
             run = self._read(run_id)

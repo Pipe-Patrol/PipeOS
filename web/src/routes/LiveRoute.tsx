@@ -6,7 +6,7 @@ import { RegionDrawer } from '@/components/live/RegionDrawer'
 import { RunSetupPanel, type RunDraft } from '@/components/live/runsetup/RunSetupPanel'
 import { ShortcutOverlay } from '@/components/live/ShortcutOverlay'
 import { VideoFeed } from '@/components/live/VideoFeed'
-import { ZoomControl } from '@/components/live/ZoomControl'
+import { ZoomControl, ZOOM_STEP, clampZoom } from '@/components/live/ZoomControl'
 import { PipeMap } from '@/components/map/PipeMap'
 import { ProfileStrip } from '@/components/profile/ProfileStrip'
 import { DetectionBoxes } from '@/components/overlay/DetectionBoxes'
@@ -308,6 +308,77 @@ export function LiveRoute() {
     [client],
   )
 
+  const setLed = useCallback(
+    (level: number) => {
+      setLedLevel(level)
+      client?.setLed(level)
+    },
+    [client],
+  )
+
+  /**
+   * Camera brightness, stepped.
+   *
+   * The current value comes from telemetry rather than local state, because the
+   * tuning panel can move it too and two sources of truth would fight: press
+   * brighter after using the slider and it would jump back to wherever the pad
+   * last left it.
+   */
+  const stepBrightness = useCallback(
+    (delta: number) => {
+      if (!client) return
+      const current = telemetry?.camera.tuning?.brightness ?? 0
+      const brightness = Math.max(-1, Math.min(1, Math.round((current + delta) * 20) / 20))
+      if (brightness === current) return
+      void client
+        .request('/api/camera/tuning', {
+          method: 'POST',
+          body: JSON.stringify({ brightness }),
+        })
+        .catch(() => {
+          // The camera panel surfaces tuning failures. A dropped step from the
+          // pad is not worth an alert over the video.
+        })
+    },
+    [client, telemetry?.camera.tuning?.brightness],
+  )
+
+  /**
+   * Everything the pad does besides drive.
+   *
+   * Deliberately the same functions the on-screen controls call, not parallel
+   * implementations: an operator on a controller and one on a trackpad have to
+   * get identical behaviour, including the guards. Flagging with no detection
+   * on screen, or recording with no run open, does nothing here because it does
+   * nothing there.
+   */
+  // A plain object, not a useMemo: `visibleDetections` is rebuilt from
+  // telemetry on every render, so a memo over it would never hit -- and
+  // useDriveInput keeps these in a ref, so their identity does not matter.
+  const gamepadActions = {
+    onFlag: () => {
+      const best = visibleDetections.reduce<Detection | null>(
+        (winner, detection) =>
+          winner === null || detection.confidence > winner.confidence
+            ? detection
+            : winner,
+        null,
+      )
+      if (best) flagDetection(best)
+    },
+    onToggleLights: () => setLed(ledLevel > 0 ? 0 : 1),
+    onToggleRecording: () => void toggleRecording(),
+    onZoomIn: () => setZoom((current) => clampZoom(current + ZOOM_STEP)),
+    onZoomOut: () => setZoom((current) => clampZoom(current - ZOOM_STEP)),
+    onBrighter: () => stepBrightness(0.05),
+    onDarker: () => stepBrightness(-0.05),
+    onResetView: () => {
+      setZoom(1)
+      stepBrightness(-(telemetry?.camera.tuning?.brightness ?? 0))
+    },
+    onReturnHome: () => home.engage('manual'),
+  }
+
   const drive = useDriveInput({
     client,
     // Locked whenever a command could not be trusted to arrive, or a dialog has
@@ -321,15 +392,8 @@ export function LiveRoute() {
       telemetry?.drive.hardware === true &&
       telemetry?.drive.armed === true,
     onSnapshot: () => void snapshot(),
+    actions: gamepadActions,
   })
-
-  const setLed = useCallback(
-    (level: number) => {
-      setLedLevel(level)
-      client?.setLed(level)
-    },
-    [client],
-  )
 
   // Both failures an operator cannot see the cause of. They go to the one bar
   // above the status bar rather than being drawn next to the button that
