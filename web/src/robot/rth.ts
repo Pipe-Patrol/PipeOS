@@ -94,6 +94,27 @@ export interface RthBudget {
   state: RthState
   /** Why there is no reserve, when there is none. Null once there is one. */
   note: string | null
+
+  /**
+   * ---- The three the bar states, each as a distance and a percentage ----
+   *
+   * The pairing is the point. A percentage alone does not answer "can I get to
+   * the next joint and back", and a distance alone cannot be compared against
+   * the pack. Both are estimates; neither is labelled as one, because every
+   * number on this console is an estimate and saying so on three of them would
+   * imply the rest are not.
+   */
+
+  /** Driven so far on this run, and the charge it took. */
+  used_m: number
+  used_pct: number | null
+  /**
+   * How much further the robot could drive on what is left — all of it, not
+   * only the free part. What is spendable without eating the return is
+   * `used`/`left`/`RTH` read together, which is what the bar is for.
+   */
+  left_m: number | null
+  left_pct: number | null
 }
 
 /**
@@ -152,6 +173,15 @@ export function returnBudget(input: RthInput): RthBudget {
       ? input.charge_pct
       : null
 
+  // Ground covered on this run alone. Known with no charge sensor at all, which
+  // is why it is computed before the branch below.
+  const driven = input.distance_travelled_m - input.distance_at_start_m
+  const used_m = Number.isFinite(driven) ? Math.max(0, driven) : 0
+  const used_pct =
+    charge_pct != null && input.charge_at_start_pct != null
+      ? Math.max(0, input.charge_at_start_pct - charge_pct)
+      : null
+
   if (burn == null || charge_pct == null) {
     return {
       distance_m,
@@ -164,6 +194,10 @@ export function returnBudget(input: RthInput): RthBudget {
       charge_pct,
       state: 'unknown',
       note: noteFor(input, charge_pct),
+      used_m,
+      used_pct,
+      left_m: null,
+      left_pct: charge_pct,
     }
   }
 
@@ -187,6 +221,11 @@ export function returnBudget(input: RthInput): RthBudget {
           ? 'warn'
           : 'ok',
     note: null,
+    used_m,
+    used_pct,
+    // Charge left, priced at the rate this pack has actually shown.
+    left_m: charge_pct / burn,
+    left_pct: charge_pct,
   }
 }
 

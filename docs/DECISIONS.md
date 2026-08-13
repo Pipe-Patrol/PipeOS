@@ -171,3 +171,46 @@ Development without a Pi runs against a simulator, behind a banner that cannot
 be dismissed. It never invents `unavailable` readings — a simulated battery is
 still blank, because a demo that shows a battery the robot cannot report would
 teach the wrong thing about the product.
+
+## The model runs on a laptop, not on the robot **[chosen]**
+
+Supersedes the decoupling rationale in *Detection is stubbed, not wired*, which
+assumed inference would happen on the Pi.
+
+RF-DETR on a Pi 5 is seconds per frame with three of four cores saturated, and
+the board runs hot enough doing it that a long inspection becomes a thermal
+problem before it is an accuracy one — for a graph and a runtime that together
+cost most of a gigabyte of SD card. So the robot posts the JPEG it already
+encoded for the video stream to a laptop and gets boxes back. Its share of the
+work is one HTTP POST of a frame it was going to encode anyway.
+
+Rejected: **in-browser inference** (onnxruntime-web), which needs a ~120 MB
+download per session and strands detections in the tab, where the run records,
+map flags and exports cannot see them. Rejected: **the console brokering
+frames**, for the same reason — detection has to reach the Pi's run store to be
+part of an inspection, not just part of a screen.
+
+The swap happens entirely behind the existing detector interface, so the run
+recorder, the map and the console are unchanged. The cost is a real operational
+dependency: the laptop must be awake and on the same network, and its address is
+a DHCP guess. That is paid for with a settings field that retargets a running
+robot, and a deploy that checks reachability *from the Pi* rather than from the
+laptop, which can obviously reach itself.
+
+Detection being off is a state the robot already handles — it drives, records
+and logs defects by hand exactly as it did with no model installed.
+
+## Detections replace rather than accumulate **[chosen]**
+
+Each inference's findings replace the previous set outright, including when the
+model finds nothing. The overlay draws them solid.
+
+They used to accumulate and fade out individually over six seconds, which was
+right when inference was seconds per frame and boxes trickled in one stale
+rectangle at a time. Off the Pi, results arrive fast enough that the only thing
+fading produced was several overlapping generations of boxes for the same crack.
+
+The six seconds survives as a staleness guard, not a display duration: if
+results stop arriving at all, the last set is dropped as a unit. A frame's
+findings are a whole answer — the model judges each image alone — so half of one
+is not a smaller truth, it is a different one.

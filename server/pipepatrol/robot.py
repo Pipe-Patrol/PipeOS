@@ -23,7 +23,7 @@ import time
 from pipepatrol import config, telemetry
 from pipepatrol.estimation import Hazards, OpticalFlow, Odometry
 from pipepatrol.hardware import Camera, Climate, Drive, IMU, Lights, host
-from pipepatrol.perception import DetectionService
+from pipepatrol.perception import DetectionService, best_detector
 from pipepatrol.runs import Recorder, RunStore
 
 log = logging.getLogger(__name__)
@@ -40,14 +40,22 @@ class Robot:
         self.camera = Camera()
 
         self.flow = OpticalFlow(self.camera)
-        self.odometry = Odometry(self.drive, self.imu, self.flow)
+        self.odometry = Odometry(self.flow)
         self.hazards = Hazards(self.drive, self.imu, self.flow)
 
         self.store = store or RunStore()
-        self.recorder = Recorder(self.camera, self.store)
+        self.recorder = Recorder(
+            self.camera,
+            self.store,
+            # Stamps each clip with the stretch of pipe it covers, which is what
+            # lets the longitudinal view draw where a recording was taken.
+            chainage=lambda: self.odometry.status()["chainage_m"],
+        )
         self.detections = DetectionService(
             self.camera,
-            detector=build_detector(),
+            # Whichever backend is selected, and an honest absence when none
+            # is usable. Either way the console renders detections the same way.
+            detector=best_detector(),
             chainage_source=lambda: self.odometry.status()["chainage_m"],
         )
 

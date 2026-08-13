@@ -1,0 +1,22 @@
+# The robot's hardware. Pi only -- deploy.sh installs this, nothing else does.
+#
+# WHY IT IS NOT IN requirements.txt. lgpio is a C extension that needs swig to
+# build, and there is no macOS wheel. On a laptop it fails the build, and pip
+# aborts the whole transaction when one package fails -- so a single Pi-only
+# GPIO driver took down the install of fastapi, pytest and everything else
+# somebody needed to run the console locally. Nothing here is importable on a
+# machine with no GPIO header anyway.
+#
+# Most of these usually come from apt on the Pi already. These are the fallback:
+#   sudo apt install python3-gpiozero python3-lgpio
+
+-r requirements.txt
+
+# GPIO. gpiozero needs lgpio as its pin factory on the Pi 5; RPi.GPIO does not
+# work there.
+gpiozero==2.0.1
+lgpio==0.2.2.0
+
+# BNO085 IMU over I2C.
+adafruit-blinka==8.51.0
+adafruit-circuitpython-bno08x==1.2.4

@@ -36,6 +36,53 @@ PATH_SAMPLE_INTERVAL_M = 0.25
 PATH_MAX_POINTS = 2000
 
 
+# Where the defect model runs. Empty means nowhere, and the robot drives,
+# records and logs defects by hand exactly as it does with no model installed.
+#
+# It is not on the Pi. RF-DETR on a Pi 5 is seconds per frame with the cores
+# pinned and the board hot, for a graph and a runtime that together cost most of
+# a gigabyte of SD card. `server/detect-host.py` serves it from a laptop
+# instead; deploy.sh fills this in with the address of whatever machine ran the
+# deploy. See perception/remote.py.
+DETECTOR_URL = os.environ.get("PIPEPATROL_DETECTOR_URL", "")
+
+# May this machine load an ONNX graph and infer locally?
+#
+# Yes on a laptop, which is where detect-host.py and a local dev server run. The
+# robot's systemd unit sets it to 0, and that is a latch rather than a
+# preference: the deploy deletes server/model and uninstalls onnxruntime, and
+# this makes sure a graph that reappears -- restored from a backup, copied over
+# by hand, left behind by an older checkout -- cannot quietly put the Pi back to
+# doing seconds-per-frame inference with its cores pinned. Off means off.
+ALLOW_LOCAL_MODEL = os.environ.get("PIPEPATROL_LOCAL_MODEL", "1") != "0"
+
+# The operator's override, set from the console's settings screen. It outranks
+# the environment: the address baked in at deploy time is a starting guess, and
+# a laptop that moved to a different network must be fixable without a redeploy
+# and must survive the power-cycle that follows.
+DETECTOR_HOST_FILE = DATA_DIR / "detector-host.txt"
+
+
+def detector_url():
+    """The configured detection host: the operator's, else the deploy's."""
+    try:
+        saved = DETECTOR_HOST_FILE.read_text().strip()
+    except OSError:
+        saved = ""
+    return saved or DETECTOR_URL
+
+
+def save_detector_url(url):
+    """Persist the operator's choice. An empty string clears it back to the deploy's."""
+    ensure_data_dir()
+    url = (url or "").strip()
+    if url:
+        DETECTOR_HOST_FILE.write_text(f"{url}\n")
+    else:
+        DETECTOR_HOST_FILE.unlink(missing_ok=True)
+    return detector_url()
+
+
 def ensure_data_dir():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     return DATA_DIR

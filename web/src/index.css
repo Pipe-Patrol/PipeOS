@@ -275,6 +275,32 @@ body,
   animation: dot-pulse 1.6s ease-in-out infinite;
 }
 
+/**
+ * The budget bar, in a return.
+ *
+ * The whole surface flashes rather than a dot on it: a return is the one state
+ * where the console is asking the operator to stop doing what they are doing,
+ * and it has to be visible from the corner of the eye of someone staring at
+ * pipe wall. Slow, and between two yellows rather than to transparent — a bar
+ * that blinked out entirely would read as a rendering fault.
+ */
+@keyframes rth-flash {
+  0%,
+  100% {
+    background: var(--color-state-warning-signal);
+  }
+  50% {
+    /* Still light enough to carry the black text at full contrast. Flashing to
+       the dark surface would make the sentence unreadable on every other beat,
+       which is the opposite of what a flash is for. */
+    background: var(--color-gauge-reserve);
+  }
+}
+
+@utility animate-rth-flash {
+  animation: rth-flash 1.4s ease-in-out infinite;
+}
+
 /* A white bloom over the frame the instant a snapshot is taken — the shutter. */
 @keyframes capture-flash {
   from {
@@ -364,6 +390,14 @@ body,
  * worth the five pixels it takes to be unmistakable rather than merely
  * differently coloured.
  */
+/**
+ * On the driving screen the H is also the return-home button.
+ *
+ * One mark rather than two. It used to sit beside a separate button in the
+ * corner of the map that did the same thing, which meant the map carried two
+ * controls for one decision and the H — the mark an operator actually looks for
+ * when the question is "how do I get out" — was the one that did nothing.
+ */
 .home-badge {
   display: flex;
   align-items: center;
@@ -379,6 +413,23 @@ body,
   font-weight: 700;
   line-height: 1;
   color: var(--color-home);
+}
+
+/* Clickable only where it is the button; see homeMarker. */
+.leaflet-interactive .home-badge,
+.home-badge[role='button'] {
+  cursor: pointer;
+}
+
+.home-badge[role='button']:hover {
+  background: rgb(30 30 30 / 0.95);
+}
+
+/** Engaged. Filled rather than outlined — the mode is on, not merely offered. */
+.home-badge--armed {
+  background: var(--color-home);
+  color: var(--color-ink-1000);
+  animation: dot-pulse 1.6s ease-in-out infinite;
 }
 
 /**

@@ -5,6 +5,12 @@ import type { Telemetry } from '@/robot/types'
 
 interface TelemetryOverlayProps {
   telemetry: Telemetry
+  /**
+   * Channels whose reading has just jumped. Those go red — the numbers are in
+   * the corner of the eye and drifting slowly is what they always do, so a step
+   * change has to announce itself where the operator is already looking.
+   */
+  spiking?: { temperature: boolean; humidity: boolean }
 }
 
 /**
@@ -30,12 +36,20 @@ interface TelemetryOverlayProps {
  * absolutely so their width can never move what is behind them. They go blank,
  * not stale, when the sensor stops answering.
  *
- * Acceleration sits under the distance, sized to be read rather than squinted
- * at, because it is what says the robot is actually moving. It reads a clean 0
- * inside the sensor's noise floor (hardware/imu.py), so a still robot shows a
- * still number instead of jitter.
+ * Speed sits under the distance, sized to be read rather than squinted at,
+ * because it is what says the robot is actually moving. It is the same
+ * measurement the distance is accumulated from — optical flow, and nothing else
+ * — so the two can never tell different stories, which is exactly what the old
+ * acceleration readout beside a duty-fused distance could do.
+ *
+ * The distance goes amber when the camera has stopped supporting it. A blind
+ * estimator does not slow down, it stops counting, and a number that has quietly
+ * stopped counting looks identical to a robot holding station.
  */
-export function TelemetryOverlay({ telemetry }: TelemetryOverlayProps) {
+export function TelemetryOverlay({
+  telemetry,
+  spiking = { temperature: false, humidity: false },
+}: TelemetryOverlayProps) {
   const { motion, drive, climate } = telemetry
   const [unit] = useTempUnit()
 
@@ -44,10 +58,10 @@ export function TelemetryOverlay({ telemetry }: TelemetryOverlayProps) {
       <Readout
         label="Distance"
         value={format.metres(Math.abs(motion.chainage_m))}
-        detail={format.acceleration(motion.accel_m_s2)}
+        detail={format.speed(motion.speed_m_s)}
         quality="estimated"
         size="lg"
-        state={motion.slipping ? 'warn' : 'normal'}
+        state={motion.blind ? 'warn' : 'normal'}
       />
 
       <div className="relative flex justify-center">
@@ -58,6 +72,7 @@ export function TelemetryOverlay({ telemetry }: TelemetryOverlayProps) {
             label="Air"
             value={format.temperature(climate.temperature_c, unit)}
             quality={climate.quality}
+            state={spiking.temperature ? 'bad' : 'normal'}
           />
         </div>
 
@@ -66,6 +81,7 @@ export function TelemetryOverlay({ telemetry }: TelemetryOverlayProps) {
             label="Humidity"
             value={format.percent(climate.humidity_pct)}
             quality={climate.quality}
+            state={spiking.humidity ? 'bad' : 'normal'}
           />
         </div>
       </div>

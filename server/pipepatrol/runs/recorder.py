@@ -24,8 +24,22 @@ from pipepatrol.runs.models import Recording
 
 log = logging.getLogger(__name__)
 
+# One pair of files per clip, numbered. These used to be fixed names, which
+# meant a second recording on the same run wrote over the first -- the run kept
+# one clip and the earlier footage was gone from the card with no warning.
 VIDEO_FILE = "video.mjpeg"
 INDEX_FILE = "video.index.json"
+
+
+def _clip_files(sequence):
+    """Filenames for the nth clip of a run. The first keeps the old names.
+
+    Clip 1 staying `video.mjpeg` means every run recorded before this change
+    still resolves, and the export path needs no special case for them.
+    """
+    if sequence <= 1:
+        return VIDEO_FILE, INDEX_FILE
+    return f"video-{sequence}.mjpeg", f"video-{sequence}.index.json"
 
 # Cap the write rate. The camera runs faster than a recording needs to, and disk
 # on a Pi is an SD card with a finite write budget.
@@ -38,12 +52,16 @@ INDEX_FLUSH_INTERVAL_S = 5.0
 class Recorder:
     """Appends camera frames to disk for the duration of a run.
 
-    One recording at a time; starting a second stops the first.
+    One recording at a time; starting a second stops the first. A run may hold
+    any number of them, each in its own pair of files.
     """
 
-    def __init__(self, camera, store):
+    def __init__(self, camera, store, chainage=None):
         self._camera = camera
         self._store = store
+        # Called at start and stop to stamp where in the pipe the clip spans.
+        # Optional so the recorder stays constructible without odometry.
+        self._chainage = chainage
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
@@ -52,6 +70,8 @@ class Recorder:
         self._bytes = 0
         self._started_at = None
         self._error = None
+        self._files = (VIDEO_FILE, INDEX_FILE)
+        self._chainage_start = None
 
     @property
     def active(self):
@@ -70,6 +90,8 @@ class Recorder:
             self._bytes = 0
             self._started_at = time.time()
             self._error = None
+            self._files = _clip_files(self._next_sequence(run_id))
+            self._chainage_start = self._chainage() if self._chainage else None
             self._stop.clear()
             self._thread = threading.Thread(
                 target=self._run, name="recorder", daemon=True
@@ -89,23 +111,32 @@ class Recorder:
         self._thread.join(timeout=5.0)
         self._thread = None
         recording = Recording(
-            file=VIDEO_FILE,
-            index_file=INDEX_FILE,
+            file=self._files[0],
+            index_file=self._files[1],
             frames=self._frames,
             bytes=self._bytes,
+            started_at=self._started_at or time.time(),
+            ended_at=time.time(),
+            chainage_start_m=self._chainage_start,
+            chainage_end_m=self._chainage() if self._chainage else None,
         )
-        self._store.update(self._run_id, recording=recording)
+        self._store.add_recording(self._run_id, recording)
         log.info(
             "recording stopped: %d frames, %.1f MB", self._frames, self._bytes / 1e6
         )
         self._run_id = None
         return recording
 
+    def _next_sequence(self, run_id):
+        """Which clip number this is, from what the run already holds."""
+        run = self._store.get(run_id)
+        return len(run.recordings) + 1 if run else 1
+
     def _run(self):
         directory = self._store.run_dir(self._run_id)
         directory.mkdir(parents=True, exist_ok=True)
-        video_path = directory / VIDEO_FILE
-        index_path = directory / INDEX_FILE
+        video_path = directory / self._files[0]
+        index_path = directory / self._files[1]
 
         interval = 1.0 / MAX_RECORD_HZ
         index = []

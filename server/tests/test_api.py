@@ -32,7 +32,10 @@ class TestHealth:
     def test_reports_absent_hardware_as_absent(self, client):
         capabilities = client.get("/api/health").json()["capabilities"]
         assert capabilities["motors"] is False  # no gpiozero on a laptop
-        assert capabilities["detector"] is False  # no model ships yet
+        # The detector depends on whether an exported model is present, which
+        # differs between a fresh clone and a machine that has run the export.
+        # Asserting either way would make this test fail for one of them.
+        assert isinstance(capabilities["detector"], bool)
 
 
 class TestStop:
@@ -267,3 +270,103 @@ class TestConsoleCaching:
         cache_control = console.get("/assets/index-abc123.js").headers["cache-control"]
         assert "immutable" in cache_control
         assert "max-age=31536000" in cache_control
+
+
+class TestDetectorHost:
+    """Where the model runs is a robot setting, changeable without a redeploy.
+
+    The address the deploy baked in is a guess about a DHCP lease, and correcting
+    it must not require SSHing into a robot that is already down a pipe.
+    """
+
+    @pytest.fixture
+    def client(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(config, "DETECTOR_HOST_FILE", tmp_path / "detector-host.txt")
+        monkeypatch.setattr(config, "DETECTOR_URL", "http://deployed.local:8600")
+        with TestClient(app) as client:
+            yield client
+
+    def test_reports_the_deployed_address_when_nothing_is_overridden(self, client):
+        body = client.get("/api/detector-host").json()
+        assert body["url"] == "http://deployed.local:8600"
+        assert body["deployed"] == "http://deployed.local:8600"
+
+    def test_setting_a_host_takes_effect_immediately(self, client):
+        body = client.post("/api/detector-host", json={"url": "mymac.local"}).json()
+        assert body["ok"] is True
+        assert body["backend"] == "remote"
+        assert body["available"] is True
+        # Normalised on the way in: operators type a host, not a URL.
+        assert body["url"] == "http://mymac.local:8600"
+
+    def test_the_override_survives_a_read(self, client):
+        client.post("/api/detector-host", json={"url": "10.0.0.9:9000"})
+        assert client.get("/api/detector-host").json()["url"] == "http://10.0.0.9:9000"
+
+    def test_clearing_it_falls_back_to_the_deployed_address(self, client):
+        client.post("/api/detector-host", json={"url": "10.0.0.9"})
+        body = client.post("/api/detector-host", json={"url": ""}).json()
+        assert body["url"] == "http://deployed.local:8600"
+
+    def test_a_robot_with_no_host_anywhere_detects_nothing_and_says_why(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(config, "DETECTOR_HOST_FILE", tmp_path / "none.txt")
+        monkeypatch.setattr(config, "DETECTOR_URL", "")
+        # What the robot's systemd unit sets: never infer locally, whatever is
+        # on the SD card.
+        monkeypatch.setattr(config, "ALLOW_LOCAL_MODEL", False)
+
+        with TestClient(app) as client:
+            client.post("/api/detector-host", json={"url": ""})
+            body = client.get("/api/detector-host").json()
+            assert body["url"] == ""
+            assert body["available"] is False
+            assert "detection host" in body["error"]
+
+
+class TestDetectorModel:
+    """The console's model button, and the wire behind it.
+
+    The robot holds no model, so switching one is a message passed to the
+    detection host. Every failure on that path has to leave a robot that still
+    drives and a console that says which end went wrong.
+    """
+
+    @pytest.fixture
+    def client(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(config, "DETECTOR_HOST_FILE", tmp_path / "detector-host.txt")
+        monkeypatch.setattr(config, "DETECTOR_URL", "")
+        with TestClient(app) as client:
+            # A port nothing listens on, so the connection is refused at once.
+            # An unroutable address would test the same paths but pay the full
+            # 15 s timeout for each of them.
+            client.post("/api/detector-host", json={"url": "127.0.0.1:9"})
+            yield client
+
+    def test_switching_without_a_host_is_refused_with_a_reason(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(config, "DETECTOR_HOST_FILE", tmp_path / "none.txt")
+        monkeypatch.setattr(config, "DETECTOR_URL", "")
+        monkeypatch.setattr(config, "ALLOW_LOCAL_MODEL", False)
+
+        with TestClient(app) as client:
+            client.post("/api/detector-host", json={"url": ""})
+            response = client.post("/api/detector-model", json={"id": "rfdetr-onnx"})
+
+        assert response.status_code == 409
+        assert "detection host" in response.json()["error"]
+
+    def test_an_unreachable_host_reports_the_network_not_the_model(self, client):
+        # Nothing is listening there, which is the point.
+        response = client.post("/api/detector-model", json={"id": "rfdetr-torch"})
+        assert response.status_code == 502
+        assert "cannot reach" in response.json()["error"]
+
+    def test_the_catalogue_degrades_to_empty_rather_than_failing(self, client):
+        body = client.get("/api/detector-model").json()
+        assert body["models"] == []
+        assert body["error"]

@@ -45,7 +45,7 @@ function run(defects: Defect[], snapshots: Snapshot[]): Run {
     note: '',
     defects,
     snapshots,
-    recording: null,
+    recordings: [],
     path: [],
   }
 }

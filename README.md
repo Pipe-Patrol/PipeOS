@@ -50,6 +50,48 @@ Run this once to set the Pi up, and again whenever the code changes. It needs
 ssh access to the Pi and the Pi's apt packages: see
 [docs/HARDWARE.md](docs/HARDWARE.md).
 
+### The defect model
+
+**The model does not run on the Pi.** It ran there once and cost seconds per
+frame with the cores pinned and the board overheating, so it now runs on your
+computer: the robot posts camera frames over the network and gets boxes back.
+The deploy actively keeps it off the Pi — it deletes any graph a previous deploy
+left behind and uninstalls `onnxruntime` from the robot's venv.
+
+Once per trained checkpoint, export it (this needs PyTorch, which running the
+model does not):
+
+```bash
+python3 -m venv /tmp/export
+/tmp/export/bin/pip install rfdetr onnx onnxruntime
+/tmp/export/bin/python server/deploy/export-model.py ~/Downloads/checkpoint_best_total.pth
+```
+
+Then, on your computer, install what serves it and start it:
+
+```bash
+cd server
+.venv/bin/pip install -r requirements-detect.txt
+.venv/bin/python detect-host.py
+```
+
+Leave that running whenever you want detection. `./deploy.sh` works out this
+machine's address and points the robot at it, then checks **from the Pi** that
+it can actually be reached — so a laptop on the wrong network is caught during
+the deploy rather than mid-inspection. Change the address later without
+redeploying in **Settings → Detection host**.
+
+**Two models, one button.** `rfdetr-onnx` is the exported graph — quick, no
+torch, and the one that has been down a pipe. `rfdetr-torch` is the newer
+checkpoint under torch, with an optional clean-pipe bank that flags conditions
+outside the seven classes as `UNKNOWN`; it is not QC'd yet. Switch between them
+in **Settings → Detection host → Model**. The button switches the laptop, not
+the robot, and one that is not installed is shown greyed with the reason.
+
+Without a reachable host the robot still drives, records and logs defects by
+hand; it just detects nothing. See [MODEL.md](MODEL.md) for the class list and
+the details.
+
 ### If coming from a newly flashed SD card
 
 If you just reflashed your microSD card, complete the setup steps below before continuing; otherwise, skip directly to step 3. Make sure you have ran the deploy command first.
@@ -85,6 +127,21 @@ Confirm the robot, press **Continue**, and you are in.
 
 **IMPORTANT**: When finished, always shut down the Pi in the GUI (settings > shutdown) or terminal before turning the robot off. Otherwise, the SD card will become corrupted, and reflashing will be required on the next start.
 
+This is a prototype's rule, and it is optional — see below.
+
+---
+
+## 4. Optional: make it an appliance
+
+Three one-time changes turn the robot into something you power on, connect to,
+and use, with no SSH and no shutdown ritual — and that survives having its plug
+pulled. See **[docs/APPLIANCE.md](docs/APPLIANCE.md)**.
+
+```bash
+sudo ~/PipeOS/server/deploy/hotspot.sh enable        # robot hosts its own WiFi
+sudo ~/PipeOS/server/deploy/readonly-root.sh enable --data-device /dev/sda1
+```
+
 ---
 
 
@@ -103,6 +160,34 @@ cd web
 npm install
 npm run dev        # http://localhost:5173
 ```
+
+Press **T twice** on any screen to boot a simulated robot in the browser — four
+seeded runs, working telemetry, no hardware. Press **T then E** to step through
+every error message, and **T then C** / **T then M** to inject an air spike or a
+detection.
+
+### Run the model on your computer
+
+The simulator fakes telemetry but not the model. To see real detections without
+a Pi, run the actual server locally — your machine is where the model runs
+anyway, so this is the same graph the robot would be getting answers from:
+
+```bash
+cd server
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-detect.txt
+.venv/bin/python -m pipepatrol        # http://localhost:8000
+```
+
+Then open the console at `http://localhost:5173`, and enter `localhost:8000` as
+the robot address. Press **D twice** for demo day mode, load a pipe video or
+some stills, and the frames go to your machine's copy of the model.
+
+Your laptop has no camera on a pipe and no motors, so the live feed and driving
+are unavailable — this is for exercising the model and the detection UI.
+
+To serve the model *to a robot* rather than exercise it locally, run
+`detect-host.py` instead — same model, none of the robot subsystems, port 8600.
 
 ### Tests
 
@@ -127,6 +212,14 @@ ssh pipepatrol@pipepatrol.local 'sudo systemctl restart pipepatrol' # bounce the
 ssh pipepatrol@pipepatrol.local 'journalctl -u pipepatrol -f'       # watch the logs live
 journalctl -u pipepatrol | grep -i "DISABLED\|unavailable        
 ```
+No detections? The model is on your computer, so check that end first:
+
+```bash
+curl -s localhost:8600/api/health                                   # is detect-host.py running?
+curl -s http://pipepatrol.local:8000/api/detector-host              # what is the robot pointed at, and does it work?
+ssh pipepatrol@pipepatrol.local 'curl -s http://<your-ip>:8600/api/health'   # can the robot reach you?
+```
+
 ```bash
 ssh pipepatrol@pipepatrol.local 'journalctl -u pipepatrol -b | grep -i camera'
 curl -s http://pipepatrol.local:8000/api/telemetry | python3 -m json.tool | grep -A8 '"camera"'
@@ -141,14 +234,15 @@ PipeOS/
 │   │   ├── api/             REST + WebSocket endpoints
 │   │   ├── estimation/      odometry, optical flow, obstacle estimates
 │   │   ├── hardware/        drive, camera, IMU, lights, host stats
-│   │   ├── perception/      defect detector
+│   │   ├── perception/      defect detection: local model, and the remote client
 │   │   ├── runs/            run storage, recording, export
 │   │   ├── app.py           app wiring + CORS
 │   │   ├── config.py        every environment knob
 │   │   ├── robot.py         owns all subsystems + the control loops
 │   │   └── telemetry.py     the telemetry envelope
 │   ├── tests/               safety, odometry, hazards, runs, api, camera
-│   └── deploy/              systemd unit
+│   ├── deploy/              systemd unit
+│   └── detect-host.py       serves the model from your computer, for the robot
 ├── web/                     React + TypeScript operator console
 │   └── src/
 │       ├── components/      live overlay, map, panels, shell, primitives

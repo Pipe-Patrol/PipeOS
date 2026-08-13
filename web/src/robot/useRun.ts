@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { RobotClient } from '@/robot/client'
 import type { Run } from '@/robot/types'
@@ -12,24 +12,55 @@ import type { Run } from '@/robot/types'
  * the whole thing polling, because nothing here changes without the operator
  * doing something.
  */
+/**
+ * Fill in what an older robot may not send.
+ *
+ * A console can outrun the firmware on the Pi — deploys are separate — and the
+ * run page reads `recordings` in half a dozen places. One missing array there
+ * is a blank screen rather than a missing section, which is a bad trade for a
+ * field that used to be called something else.
+ */
+function normalise(run: Run): Run {
+  return { ...run, recordings: run.recordings ?? [] }
+}
+
 export function useRun(client: RobotClient | null, runId: string | null) {
   const [run, setRun] = useState<Run | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  /**
+   * Which fetch is the current one. A reply that is not it is dropped.
+   *
+   * THE BUG THIS FIXES. Finishing a run refetched it, and a moment later
+   * telemetry reported no active run, which clears this hook to null. The fetch
+   * was still in flight, so it landed *after* the clear and put the finished run
+   * back — leaving the console holding a run the robot had already sealed. It
+   * looked like the UI lagging behind the button: the map kept the old run's
+   * origin, defects and trail while everything driven off telemetry had already
+   * moved on.
+   */
+  const current = useRef(0)
+
   const refresh = useCallback(async () => {
+    const ticket = ++current.current
+
     if (!client || !runId) {
       setRun(null)
+      setError(null)
       return
     }
     setLoading(true)
     try {
-      setRun(await client.request<Run>(`/api/runs/${runId}`))
+      const next = normalise(await client.request<Run>(`/api/runs/${runId}`))
+      if (ticket !== current.current) return
+      setRun(next)
       setError(null)
     } catch (caught) {
+      if (ticket !== current.current) return
       setError(caught instanceof Error ? caught.message : 'could not load the run')
     } finally {
-      setLoading(false)
+      if (ticket === current.current) setLoading(false)
     }
   }, [client, runId])
 

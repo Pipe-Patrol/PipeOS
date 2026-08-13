@@ -151,15 +151,6 @@ describe('the blocking rows', () => {
     expect(check(missing, 'camera').value).toBe(READING.notDetected)
   })
 
-  it('blocks when there is no acceleration reading, however the IMU reports', () => {
-    const telemetry = {
-      ...HEALTHY,
-      orientation: { ...HEALTHY.orientation, accel_m_s2: null },
-    }
-
-    expect(blockerIds(telemetry)).toEqual(['accelerometer'])
-  })
-
   it('blocks below the battery floor and only warns above it', () => {
     const flat = {
       ...HEALTHY,
@@ -230,7 +221,16 @@ describe('the advisory rows', () => {
     } as unknown as Telemetry
 
     expect(check(telemetry, 'imu').status).toBe('warn')
-    // The accelerometer is still reporting here, so nothing blocks.
+    expect(blockerIds(telemetry)).toEqual([])
+  })
+
+  it('warns rather than blocks when there is no acceleration reading', () => {
+    const telemetry = {
+      ...HEALTHY,
+      orientation: { ...HEALTHY.orientation, accel_m_s2: null },
+    } as unknown as Telemetry
+
+    expect(check(telemetry, 'accelerometer').status).toBe('warn')
     expect(blockerIds(telemetry)).toEqual([])
   })
 

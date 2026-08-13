@@ -1,18 +1,18 @@
-"""Real detector backends, behind the seam `detector.py` defines.
+"""RF-DETR from the torch checkpoint, with an optional anomaly bank.
 
-Two of them, because there are two honest answers to where inference runs.
+The newer of the two models the catalogue can serve. `rfdetr.py` holds the
+other -- the same architecture exported to ONNX, which needs no torch and is
+what has actually been down a pipe. An operator picks between them from the
+console; see catalogue.py.
 
-`RFDetrDetector` loads the model in this process. Simple, no network, and the
-right answer on a laptop. On a Pi it means installing torch and waiting several
-seconds a frame, which the service is built to tolerate but nobody enjoys.
+WHERE IT RUNS. On a laptop, via detect-host.py. Loading it needs torch and the
+`rfdetr` package, several gigabytes of it, and inference is slow enough that
+putting it on the Pi is the thing that got the model taken off the Pi in the
+first place. The robot never imports this.
 
-`RemoteDetector` posts the frame to an inference server and needs only
-`requests`. The Pi stays light, the laptop does the work, and the robot keeps
-driving while it waits. This is the same split PipePatrolML already makes.
-
-Both report `available = False` rather than raising when their dependencies are
-missing, so a console with no model installed starts and runs exactly as it
-does today. A detector that cannot load must not stop the robot.
+Loading is deferred to the first inference, and a missing dependency reports
+`available = False` rather than raising, so a host with no checkpoint still
+starts and says why.
 
 ANOMALY. Optionally, a memory bank of clean-pipe patches runs alongside the
 detector and emits an UNKNOWN detection when a frame looks unlike anything in
@@ -29,22 +29,30 @@ from pipepatrol.perception.detector import Detection
 
 log = logging.getLogger(__name__)
 
-# The trained classes, in the console's own codes from web/src/constants/defects.ts.
-# Change the right-hand side to change what the operator sees; nothing else
-# depends on the model's own naming.
+# The trained classes, in the model's own words.
 #
-# Utility intrusion has no code of its own yet, so it lands on OB: another
-# utility bored through the pipe is, literally, an object restricting the bore.
-# Give it its own entry in defects.ts and change one line here when there is
-# time, because "obstacle" undersells a gas line through a sewer.
+# NOT short codes. The console matches an incoming detection by this string --
+# `detectionClassOf` in web/src/constants/detection-classes.ts, which keys on
+# `crack`, `deposition` and so on -- and everything hangs off that match: the
+# box colour, the per-class mute, the auto-flag rules, and whether a defect the
+# model found counts as the same thing as a defect an operator logged by hand.
+# A code like "CR" matches nothing, so the box still draws, in the fallback
+# grey, with no way to mute it and no rule that can fire on it.
+#
+# The codes live in defects.ts and are derived FROM these names, which is the
+# direction that keeps one vocabulary rather than two.
+#
+# Utility intrusion gets its own entry rather than being folded into
+# obstruction: the console has had a class for it since the seven landed, and
+# "obstruction" undersells a gas line bored through a sewer.
 LABELS = {
-    1: "CR",   # crack
-    2: "DE",   # deposition
-    3: "EN",   # incrustation
-    4: "JD",   # joint offset
-    5: "OB",   # obstruction
-    6: "RO",   # root intrusion
-    7: "OB",   # utility intrusion, see above
+    1: "crack",
+    2: "deposition",
+    3: "incrustation",
+    4: "joint offset",
+    5: "obstruction",
+    6: "root intrusion",
+    7: "utility intrusion",
 }
 
 CONF_THRESHOLD = float(os.environ.get("PIPEPATROL_CONF_THRESHOLD", "0.30"))
@@ -75,7 +83,9 @@ class RFDetrDetector:
     an unavailable backend rather than an ImportError at startup.
     """
 
-    name = "rfdetr"
+    # Distinct from rfdetr.py's "rf-detr": the console shows this, and "which
+    # of the two is loaded" is the whole question it is answering.
+    name = "rfdetr-torch"
 
     def __init__(self, weights=None, anomaly_bank=None):
         self._weights = weights or os.environ.get("PIPEPATROL_WEIGHTS")
@@ -96,7 +106,15 @@ class RFDetrDetector:
         log.info("loading detector from %s", self._weights)
         self._model = RFDETRLarge(pretrain_weights=self._weights)
 
-    def infer(self, jpeg):
+    def infer(self, jpeg, min_confidence=None):
+        """`min_confidence` overrides the floor, and the signature has to carry it.
+
+        Every backend takes it: the model lab drops the floor to zero to tell
+        "looked and was not convinced" apart from "returns nothing for
+        everything", and DetectionService passes it straight through. A backend
+        that omits the argument raises TypeError the first time somebody opens
+        the lab against it, which is a long way from where the mistake was made.
+        """
         if self._model is None:
             try:
                 self._load()
@@ -110,7 +128,8 @@ class RFDetrDetector:
         image = Image.open(io.BytesIO(jpeg)).convert("RGB")
         width, height = image.size
 
-        result = self._model.predict(image, threshold=CONF_THRESHOLD)
+        floor = CONF_THRESHOLD if min_confidence is None else float(min_confidence)
+        result = self._model.predict(image, threshold=floor)
 
         found = []
         for box, confidence, class_id in zip(
@@ -136,57 +155,14 @@ class RFDetrDetector:
 
 # --------------------------------------------------------------------------
 
-class RemoteDetector:
-    """Inference on another machine. The Pi carries no model.
-
-    The frame goes out as JPEG bytes and comes back as detections. Everything
-    about the shape of a Detection stays here, so the server can change without
-    the console caring.
-    """
-
-    name = "remote"
-
-    def __init__(self, url=None, timeout=None):
-        self._url = url or os.environ.get("PIPEPATROL_INFERENCE_URL")
-        self._timeout = timeout or float(
-            os.environ.get("PIPEPATROL_INFERENCE_TIMEOUT", "15")
-        )
-
-    @property
-    def available(self):
-        return bool(self._url)
-
-    def infer(self, jpeg):
-        import requests
-
-        response = requests.post(
-            self._url,
-            files={"file": ("frame.jpg", jpeg, "image/jpeg")},
-            timeout=self._timeout,
-        )
-        response.raise_for_status()
-        payload = response.json()
-
-        found = []
-        for item in payload.get("detections", []):
-            label = item.get("label") or LABELS.get(item.get("class_id"))
-            if not label:
-                continue
-            box = item.get("box")
-            # A server that classifies without localising sends no box, and
-            # that is allowed: the console draws a chip instead of a rectangle.
-            found.append(Detection(
-                label=label,
-                confidence=float(item.get("confidence", 0.0)),
-                box=box,
-            ))
-
-        score = payload.get("anomaly_score")
-        threshold = payload.get("anomaly_threshold")
-        if score is not None and threshold is not None and score >= threshold and not found:
-            found.append(Detection(label="UNKNOWN", confidence=float(score)))
-
-        return found
+# Remote inference lives in remote.py, not here.
+#
+# There were two RemoteDetectors for a while -- this module grew one at the same
+# time as remote.py did, independently -- and two classes of the same name in
+# sibling modules is the kind of thing that gets debugged twice. remote.py is
+# the one that is wired: it posts the raw JPEG body rather than a multipart
+# upload, needs no `requests` on the Pi, and treats a configured-but-unreachable
+# host as still available so a laptop that wakes up resumes on its own.
 
 
 # --------------------------------------------------------------------------
@@ -254,26 +230,3 @@ class AnomalyBank:
         # render it with the machinery it already has.
         confidence = min(1.0, score / (self._threshold * 2))
         return Detection(label="UNKNOWN", confidence=confidence)
-
-
-# --------------------------------------------------------------------------
-
-def build_detector():
-    """Whichever backend the environment asks for.
-
-    Nothing configured means NullDetector stays in place and the console
-    behaves exactly as it does today.
-    """
-    if os.environ.get("PIPEPATROL_INFERENCE_URL"):
-        return RemoteDetector()
-
-    weights = os.environ.get("PIPEPATROL_WEIGHTS")
-    if weights:
-        return RFDetrDetector(
-            weights=weights,
-            anomaly_bank=os.environ.get("PIPEPATROL_ANOMALY_BANK"),
-        )
-
-    from pipepatrol.perception.detector import NullDetector
-
-    return NullDetector()

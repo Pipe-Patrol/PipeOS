@@ -72,18 +72,27 @@ export interface Motion {
   speed_m_s: number
   /** Grows monotonically. Nothing underground can re-fix it. */
   uncertainty_m: number
+  /** Always 0: the pipe is the ruler and the track runs along it. */
   heading_deg: number
   position: { x: number; y: number }
   /**
-   * Which estimator produced the current speed. The `inertial` pair integrate
-   * IMU acceleration; the others are the fallback when no accelerometer is
-   * fitted. See estimation/odometry.py.
+   * How the current speed was arrived at. `visual` is a measurement; `coasting`
+   * is the last measurement carried through a brief blind patch; `blind` means
+   * the camera is giving nothing and the odometer has stopped. Nothing here
+   * comes from the wheels or the IMU — see estimation/odometry.py.
    */
-  source: 'inertial' | 'inertial+flow' | 'fused' | 'duty' | 'stopped'
-  /** Wheels turning, picture not. */
+  source: 'visual' | 'coasting' | 'blind' | 'stopped'
+  /**
+   * The features the visual estimate is following, normalised to the frame.
+   * Absent when nothing is tracked or OpenCV is not installed. Settings draws
+   * these so an operator can see whether the distance has anything behind it.
+   */
+  flow_points?: [number, number][] | null
+  /** The camera is supporting nothing and the distance has stopped counting. */
+  blind: boolean
+  /** Kept on the wire and always false: nothing here can disagree with wheels. */
   slipping: boolean
   calibrated: boolean
-  accel_m_s2: number | null
 }
 
 /** A reading with no sensor behind it. `percent` is always null today. */
@@ -310,6 +319,20 @@ export interface Snapshot {
   file: string
 }
 
+export interface Recording {
+  id: string
+  file: string
+  index_file: string
+  frames: number
+  bytes: number
+  started_at: number
+  ended_at: number | null
+  duration_s: number
+  /** The stretch of pipe this clip covers. Null when odometry had nothing. */
+  chainage_start_m: number | null
+  chainage_end_m: number | null
+}
+
 export interface PathPoint {
   chainage_m: number
   x: number
@@ -326,6 +349,10 @@ export interface Run extends Omit<
   note: string
   defects: Defect[]
   snapshots: Snapshot[]
-  recording: { file: string; index_file: string; frames: number; bytes: number } | null
+  /**
+   * Every clip taken on the run, in order. A run holds any number of them —
+   * the operator stops and starts as they work.
+   */
+  recordings: Recording[]
   path: PathPoint[]
 }

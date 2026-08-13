@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { FinishRunPrompt } from '@/components/live/FinishRunPrompt'
 import { NoRunOverlay } from '@/components/live/NoRunOverlay'
@@ -8,21 +8,40 @@ import { ShortcutOverlay } from '@/components/live/ShortcutOverlay'
 import { VideoFeed } from '@/components/live/VideoFeed'
 import { ZoomControl } from '@/components/live/ZoomControl'
 import { PipeMap } from '@/components/map/PipeMap'
-import { AlertBanner } from '@/components/overlay/AlertBanner'
 import { ProfileStrip } from '@/components/profile/ProfileStrip'
 import { DetectionBoxes } from '@/components/overlay/DetectionBoxes'
 import { DirectionArrow } from '@/components/overlay/DirectionArrow'
+import { FlowPoints } from '@/components/overlay/FlowPoints'
+import { MarkerBoxes } from '@/components/overlay/MarkerBoxes'
 import { ReturnHomeBanner } from '@/components/overlay/ReturnHomeBanner'
 import { TelemetryOverlay } from '@/components/overlay/TelemetryOverlay'
 import { ToolPalette, type PanelId } from '@/components/panel/ToolPalette'
+import { FinishIcon } from '@/components/primitives/icons'
 import { PoweredOff } from '@/components/shell/ShutdownDialog'
 import { useDriveInput } from '@/input/useDriveInput'
+import { DEFECT_TYPES } from '@/constants/defects'
+import { detectionClassOf } from '@/constants/detection-classes'
 import { readError } from '@/lib/errors'
+import { useFeedBounds } from '@/lib/feedBounds'
+import { clearNotice, raiseNotice } from '@/lib/notices'
+import { usePreferences } from '@/lib/preferences'
+import { useDemoDay } from '@/lib/useDemoDay'
+import { regionFromBox } from '@/lib/region'
 import { useReturnHome } from '@/robot/ReturnHomeProvider'
 import { useRobot } from '@/robot/RobotProvider'
+import { useAutoFlag } from '@/robot/useAutoFlag'
+import { describeSpike, useClimateSpikes } from '@/robot/useClimateSpikes'
 import { useLiveTrail } from '@/robot/useLiveTrail'
 import { useRun } from '@/robot/useRun'
-import type { DefectRegion, Run } from '@/robot/types'
+import type { DefectRegion, Detection, Run } from '@/robot/types'
+
+/** A key typed into a field is not a shortcut. */
+function isTyping(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return (
+    target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+  )
+}
 
 /**
  * The driving screen.
@@ -39,10 +58,25 @@ import type { DefectRegion, Run } from '@/robot/types'
 export function LiveRoute() {
   const { client, link, telemetry, disconnect } = useRobot()
   const home = useReturnHome()
+  const prefs = usePreferences()
+  useDemoDay(client)
 
   const [zoom, setZoom] = useState(1)
   const [ledLevel, setLedLevel] = useState(0)
   const [panel, setPanel] = useState<PanelId | null>(null)
+  // Auto mode: the model and the air sensor file defects without being asked.
+  // Off on every load — an autonomous behaviour that survives a page reload is
+  // one nobody remembers switching on.
+  const [autoMode, setAutoMode] = useState(false)
+  /**
+   * What the defect panel should open already holding.
+   *
+   * Set by the two things that know what the defect is before the operator
+   * says so: a box on the feed the model drew, and an air spike. Both have
+   * already done the work of deciding, and asking for it again in the panel
+   * would be asking twice.
+   */
+  const [prefill, setPrefill] = useState<{ code?: string; note?: string } | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [starting, setStarting] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
@@ -62,17 +96,101 @@ export function LiveRoute() {
   // the feed and the panel only displays it.
   const [defectRegion, setDefectRegion] = useState<DefectRegion | null>(null)
   const [defectRegionMarkedAt, setDefectRegionMarkedAt] = useState(0)
-  const [drawingRegion, setDrawingRegion] = useState(false)
+  // The class chosen in the defect panel, carried here so the box being dragged
+  // on the feed is already the colour it will be saved in.
+  const [drawingRegion, setDrawingRegion] = useState<{
+    className: string
+    label: string
+  } | null>(null)
+
+  // The feed's height, published for every panel to cap itself against.
+  const feedRef = useRef<HTMLElement>(null)
+  useFeedBounds(feedRef)
 
   // Stamped here, where the box is actually committed, so the panel's still
   // freezes on one frame instead of chasing the region in an effect.
+  const clearPrefill = useCallback(() => setPrefill(null), [])
+
   const markRegion = useCallback((region: DefectRegion | null) => {
     setDefectRegion(region)
     if (region) setDefectRegionMarkedAt(Date.now())
   }, [])
 
   const activeRunId = telemetry?.run.active ? telemetry.run.id : null
+  const runActive = activeRunId !== null
   const { run, refresh: refreshRun } = useRun(client, activeRunId)
+
+  /**
+   * Finishing a run puts the screen back to how it opens.
+   *
+   * Everything below outlives a run on its own — none of it is keyed on the run
+   * id — so after finishing one the console kept a half-filled defect form, a
+   * box drawn on pipe that is no longer in front of the robot, a panel open
+   * over nothing, and auto flagging still armed for the next run nobody had
+   * started yet. The map and the longitudinal strip already reset themselves
+   * from the run id; this is everything that does not.
+   */
+  const lastRunId = useRef(activeRunId)
+  useEffect(() => {
+    if (lastRunId.current === activeRunId) return
+    lastRunId.current = activeRunId
+    setDefectRegion(null)
+    setDefectRegionMarkedAt(0)
+    setDrawingRegion(null)
+    setPrefill(null)
+    setPanel(null)
+    setZoom(1)
+    setAutoMode(false)
+    setRunError(null)
+    setEndError(null)
+  }, [activeRunId])
+
+  const spikes = useClimateSpikes(telemetry?.climate ?? null, {
+    temperature: prefs.spikeTemperatureC,
+    humidity: prefs.spikeHumidityPct,
+    enabled: prefs.spikeWarnings,
+  })
+
+  // Filtered here rather than in the overlay, so auto flagging and the Enter
+  // key act on exactly what the operator can see. A class muted in settings is
+  // one the console has been told not to raise, and raising it silently would
+  // be worse than not drawing it.
+  const visibleDetections = (telemetry?.detections ?? []).filter(
+    (detection) =>
+      detection.confidence >= prefs.detectionThreshold &&
+      !prefs.mutedClasses.includes(detectionClassOf(detection.label)?.name ?? ''),
+  )
+
+  /**
+   * Accept a box the model drew: open the flag form with its class and its
+   * region already in place.
+   *
+   * The model has done the two things that take the longest — deciding what it
+   * is and drawing where it is — so this keeps both rather than dropping the
+   * operator into an empty form beside a box it already got right.
+   */
+  const flagDetection = useCallback((detection: Detection) => {
+    const type = detectionClassOf(detection.label)
+    const entry = DEFECT_TYPES.find((candidate) => candidate.className === type?.name)
+    markRegion(regionFromBox(detection.box))
+    setPrefill({
+      code: entry?.code,
+      note: `Model — ${Math.round(detection.confidence * 100)}% confident`,
+    })
+    setPanel('defects')
+  }, [markRegion])
+
+  useAutoFlag({
+    client,
+    enabled: autoMode,
+    run,
+    motion: telemetry?.motion ?? null,
+    detections: visibleDetections,
+    spikes: prefs.autoFlagOnSpikes ? spikes.active : [],
+    threshold: prefs.autoFlagThreshold,
+    cooldownM: prefs.autoFlagCooldownM,
+    onLogged: refreshRun,
+  })
 
   // The map draws this rather than run.path. The robot's copy only reaches the
   // console when something forces a refetch — a snapshot, a defect — so drawing
@@ -82,14 +200,14 @@ export function LiveRoute() {
   // Driving is locked while any of these has the screen — including drawing,
   // where the operator is pointing at pipe wall rather than watching where the
   // robot is going, and a stray key would move it out from under the box.
-  const modalOpen = showShortcuts || setupOpen || drawingRegion || finishing
+  const modalOpen = showShortcuts || setupOpen || drawingRegion !== null || finishing
 
-  const startDrawingRegion = useCallback(() => {
+  const startDrawingRegion = useCallback((className: string, label: string) => {
     // Always draw at 1x. Screen-to-frame mapping assumes the whole frame is on
     // show, so a box drawn while zoomed in would be filed against the wrong
     // part of the picture — and silently, which is the worst kind of wrong.
     setZoom(1)
-    setDrawingRegion(true)
+    setDrawingRegion({ className, label })
   }, [])
 
   const snapshot = useCallback(async () => {
@@ -130,7 +248,10 @@ export function LiveRoute() {
         setFinishing(false)
         setRunClosed(false)
         setEnding(false)
-        await refreshRun()
+        // Deliberately not refetching the run. It is sealed, so there is
+        // nothing new to read, and telemetry reporting no active run is what
+        // clears the screen a moment later. Fetching it here was a race against
+        // that clear — see the ticket in useRun.
         return
       }
 
@@ -148,7 +269,7 @@ export function LiveRoute() {
         setEnding(false)
       }
     },
-    [client, activeRunId, refreshRun, disconnect, runClosed],
+    [client, activeRunId, disconnect, runClosed],
   )
 
   const toggleRecording = useCallback(async () => {
@@ -210,6 +331,105 @@ export function LiveRoute() {
     [client],
   )
 
+  // Both failures an operator cannot see the cause of. They go to the one bar
+  // above the status bar rather than being drawn next to the button that
+  // failed, which is the rule everywhere: errors live in one place.
+  useEffect(() => {
+    if (runError) raiseNotice('run-start', 'fault', runError)
+    else clearNotice('run-start')
+  }, [runError])
+
+  useEffect(() => {
+    if (endError) raiseNotice('run-end', 'fault', endError)
+    else clearNotice('run-end')
+  }, [endError])
+
+  /**
+   * A sudden change in the air, as a prompt rather than a report.
+   *
+   * The bar says what moved; the button opens the defect panel with the note
+   * already written, because the operator is driving and the useful half of
+   * "humidity jumped 12%" is being able to file it without typing. In auto mode
+   * it has already been filed, so the bar just says so.
+   */
+  const spike = spikes.active[0] ?? null
+  useEffect(() => {
+    if (!spike) {
+      clearNotice('climate-spike')
+      return
+    }
+    raiseNotice(
+      'climate-spike',
+      'warning',
+      describeSpike(spike),
+      autoMode
+        ? undefined
+        : {
+            label: 'Flag it',
+            run: () => {
+              setPrefill({ note: describeSpike(spike) })
+              setPanel('defects')
+              spikes.dismiss(spike.channel)
+            },
+          },
+    )
+  }, [spike, autoMode, spikes])
+
+  useEffect(() => () => clearNotice('climate-spike'), [])
+
+  /**
+   * Something in the way.
+   *
+   * The model has an `obstruction` class, so this is the model's own answer
+   * rather than a second estimator inferring one — and it goes to the notice
+   * bar with everything else rather than becoming a special case on the glass.
+   */
+  const obstruction = visibleDetections.find(
+    (detection) => detectionClassOf(detection.label)?.name === 'obstruction',
+  )
+  useEffect(() => {
+    if (!obstruction) {
+      clearNotice('obstruction')
+      return
+    }
+    raiseNotice(
+      'obstruction',
+      'warning',
+      `Obstruction ahead — ${Math.round(obstruction.confidence * 100)}% confident`,
+      autoMode ? undefined : { label: 'Flag it', run: () => flagDetection(obstruction) },
+    )
+  }, [obstruction, autoMode, flagDetection])
+
+  useEffect(() => () => clearNotice('obstruction'), [])
+
+  /**
+   * Enter files the box the model is most sure about.
+   *
+   * Driving is a two-handed job and the mouse is the hand that is not on the
+   * throttle. The most confident box is nearly always the one the operator
+   * would have clicked, so it is worth a key.
+   */
+  useEffect(() => {
+    if (modalOpen || !runActive || autoMode) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.repeat) return
+      if (isTyping(event.target)) return
+      const best = visibleDetections
+        .filter((detection) => detection.box !== null)
+        .sort((a, b) => b.confidence - a.confidence)[0]
+      if (!best) return
+      event.preventDefault()
+      flagDetection(best)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  useEffect(() => () => {
+    clearNotice('run-start')
+    clearNotice('run-end')
+  }, [])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === '?') setShowShortcuts(true)
@@ -231,11 +451,10 @@ export function LiveRoute() {
 
   if (!client) return null
 
-  const runActive = telemetry?.run.active === true
 
   return (
     <div className="flex h-full flex-col bg-ink-1000">
-      <section className="relative min-h-0 flex-1">
+      <section ref={feedRef} className="relative min-h-0 flex-1">
         <VideoFeed
           client={client}
           zoom={zoom}
@@ -252,13 +471,49 @@ export function LiveRoute() {
 
         {telemetry && (
           <>
-            <DetectionBoxes detections={telemetry.detections} now={telemetry.at} />
+            {prefs.showDetections && (
+              <DetectionBoxes
+                detections={visibleDetections}
+                onFlag={runActive && !autoMode ? flagDetection : undefined}
+              />
+            )}
 
+            {/* The features the distance estimate is actually following. Off by
+                default: it is the working, not the answer. */}
+            {prefs.showFlowPoints && <FlowPoints points={telemetry.motion.flow_points} />}
+
+            {/* Defects already filed on this run, drawn back on as the robot
+                passes the chainage they were logged at. */}
+            {run && prefs.showMarkers && (
+              <MarkerBoxes
+                defects={run.defects}
+                chainage_m={telemetry.motion.chainage_m}
+                range_m={prefs.markerRangeM}
+              />
+            )}
+
+            {/* Nothing that has gone wrong is drawn here. The robot's alert
+                line goes to the notice bar above the status bar with everything
+                else; a return is not a fault, so it stays. */}
             <div className="pointer-events-none absolute top-6 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-3">
-              <TelemetryOverlay telemetry={telemetry} />
-              <AlertBanner alert={telemetry.alert} />
-              {/* Below the fault line, not in it: a return is a decision about
-                  the run, and a broken sensor is a decision about the robot. */}
+              {prefs.showTelemetry && (
+                <TelemetryOverlay
+                  telemetry={telemetry}
+                  spiking={{
+                    temperature: spikes.temperature !== null,
+                    humidity: spikes.humidity !== null,
+                  }}
+                />
+              )}
+              {/* A mode that keeps filing defects after the operator has
+                  stopped thinking about it has to say so on the glass, not
+                  only as a lit button in the rail. */}
+              {autoMode && runActive && (
+                <span className="overlay-shadow rounded-panel border border-state-recording-signal/25 bg-state-recording-signal/15 px-2 py-0.5 text-[11px] font-semibold tracking-[0.08em] text-state-recording-signal uppercase">
+                  Auto flagging
+                </span>
+              )}
+
               {runActive && <ReturnHomeBanner />}
             </div>
 
@@ -272,12 +527,15 @@ export function LiveRoute() {
                   setEndError(null)
                   setFinishing(true)
                 }}
-                className="panel absolute top-5 right-5 z-10 flex h-9 items-center rounded-panel px-3 text-[13px] text-ink-100 transition-colors hover:bg-white/10"
+                className="panel absolute top-5 right-5 z-10 flex size-9 items-center justify-center rounded-panel text-ink-200 transition-colors hover:bg-white/10 hover:text-ink-0"
+                title="Finish the run"
+                aria-label="Finish the run"
               >
-                Finish run
+                <FinishIcon size={18} weight={0.95} />
               </button>
             )}
 
+            {prefs.showMap && (
             <div className="absolute bottom-5 left-5 z-10">
               <PipeMap
                 path={trail}
@@ -289,16 +547,21 @@ export function LiveRoute() {
                 home={home}
               />
             </div>
+            )}
 
-            <div className="absolute right-5 bottom-5 z-10">
-              <ZoomControl zoom={zoom} onZoom={setZoom} />
-            </div>
+            {prefs.showZoom && (
+              <div className="absolute right-5 bottom-5 z-10">
+                <ZoomControl zoom={zoom} onZoom={setZoom} />
+              </div>
+            )}
 
             {/* Hidden, not unmounted, while the box is being drawn: the panel
                 holds a half-filled defect form and unmounting would throw away
                 the code, severity and note the operator already chose. */}
+            {/* z-50: the tool rail and its panels are the top layer, above
+                every overlay on the video. See Popover. */}
             <div
-              className={`absolute top-1/2 right-5 z-10 -translate-y-1/2 ${
+              className={`absolute top-1/2 right-5 z-50 -translate-y-1/2 ${
                 drawingRegion ? 'invisible' : ''
               }`}
             >
@@ -313,24 +576,32 @@ export function LiveRoute() {
                 onSnapshot={() => void snapshot()}
                 onToggleRecording={() => void toggleRecording()}
                 onRunChanged={() => void refreshRun()}
-                drawingRegion={drawingRegion}
+                drawingRegion={drawingRegion !== null}
                 defectRegion={defectRegion}
                 defectRegionMarkedAt={defectRegionMarkedAt}
                 onDefectRegionChange={markRegion}
                 onDrawDefectRegion={startDrawingRegion}
+                autoMode={autoMode}
+                onAutoMode={setAutoMode}
+                spiking={spikes.active.length > 0}
+                prefill={prefill}
+                onPrefillUsed={clearPrefill}
               />
             </div>
 
             {drawingRegion && (
               <RegionDrawer
+                className={drawingRegion.className}
+                label={drawingRegion.label}
                 onCommit={(region) => {
                   markRegion(region)
-                  setDrawingRegion(false)
+                  setDrawingRegion(null)
                 }}
-                onCancel={() => setDrawingRegion(false)}
+                onCancel={() => setDrawingRegion(null)}
               />
             )}
 
+            {prefs.showDirection && (
             <DirectionArrow
               direction={drive.direction}
               source={drive.source}
@@ -338,6 +609,7 @@ export function LiveRoute() {
               locked={drive.locked}
               lockHint={drive.lockHint}
             />
+            )}
 
             {finishing && (
               <FinishRunPrompt
@@ -394,7 +666,7 @@ export function LiveRoute() {
 
       {/* Only while a run is open. With no run there is no chainage that means
           anything, and an axis of zeroes would be decoration. */}
-      {telemetry && runActive && (
+      {telemetry && runActive && prefs.showProfile && (
         <ProfileStrip
           client={client}
           run={run}

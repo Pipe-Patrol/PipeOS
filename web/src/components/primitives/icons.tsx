@@ -1,7 +1,10 @@
 import type { ReactNode } from 'react'
 import {
+  Check,
   ClockCounterClockwise,
+  Crosshair,
   Sliders,
+  Sparkle,
   SteeringWheel,
 } from '@phosphor-icons/react'
 
@@ -101,6 +104,21 @@ export function RunsIcon(props: IconProps) {
 /** Settings: faders, not a gear. This is a console, not a preferences pane. */
 export function SettingsIcon(props: IconProps) {
   return <Phosphor icon={Sliders} {...props} />
+}
+
+/** Auto flagging: the robot deciding for itself. */
+export function AutoIcon(props: IconProps) {
+  return <Phosphor icon={Sparkle} {...props} />
+}
+
+/** Recentre: put the robot back under the crosshair. */
+export function RecentreIcon(props: IconProps) {
+  return <Phosphor icon={Crosshair} {...props} />
+}
+
+/** Finish the run. A tick, because the outcome is "done", not "stop". */
+export function FinishIcon(props: IconProps) {
+  return <Phosphor icon={Check} {...props} />
 }
 
 /**

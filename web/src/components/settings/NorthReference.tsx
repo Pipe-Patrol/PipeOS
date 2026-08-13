@@ -117,7 +117,7 @@ export function NorthControl({
           inputMode="decimal"
           onChange={(event) => setFacing(event.target.value)}
           aria-label="Bearing the robot is currently facing, in degrees"
-          className="h-8 w-16 rounded-panel border border-ink-800 bg-white/5 px-2 text-[12px] tnum text-ink-100 focus:border-white/35 focus:outline-none"
+          className="h-8 w-16 rounded-panel border border-ink-800 bg-white/5 px-2 text-[12px] tnum text-ink-100 focus:border-white/20 focus:outline-none"
         />
         <Button
           onClick={() => void set()}

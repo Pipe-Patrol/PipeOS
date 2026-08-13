@@ -151,21 +151,36 @@ export function pin(latlng: L.LatLngExpression, colour: string): L.CircleMarker 
  * A divIcon rather than an image: the stock Leaflet marker is a PNG resolved
  * relative to the CSS, and there may be no network at all down a manhole.
  */
-export function homeMarker(latlng: L.LatLngExpression): L.Marker {
-  return L.marker(latlng, {
+export function homeMarker(
+  latlng: L.LatLngExpression,
+  options: { onClick?: () => void; returning?: boolean; title?: string } = {},
+): L.Marker {
+  const { onClick, returning = false, title } = options
+  const marker = L.marker(latlng, {
     icon: L.divIcon({
       className: '',
-      html: '<span class="home-badge">H</span>',
+      html: `<span class="home-badge${returning ? ' home-badge--armed' : ''}"${
+        title ? ` title="${escapeAttribute(title)}"` : ''
+      } role="${onClick ? 'button' : 'img'}" aria-label="${escapeAttribute(
+        title ?? 'Entry point',
+      )}">H</span>`,
       iconSize: [18, 18],
       iconAnchor: [9, 9],
     }),
-    // Non-interactive: this map sits on the driving screen and nothing on it
-    // should swallow a click meant for the video behind it.
-    interactive: false,
+    // Clickable only where it is the return control. Everywhere else it stays
+    // inert so it cannot swallow a click meant for the map behind it.
+    interactive: onClick !== undefined,
     keyboard: false,
     // Above the track, below the live position.
     zIndexOffset: 100,
   })
+  if (onClick) marker.on('click', onClick)
+  return marker
+}
+
+/** The label goes into an HTML string, so it has to survive being one. */
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 }
 
 /** Where the robot is now — the pulsing blue mark, shared with the strip. */

@@ -35,7 +35,7 @@ export function SafetySection({ accepted, onAccept }: SafetySectionProps) {
         ))}
       </ul>
 
-      <label className="flex items-start gap-3 rounded-panel border border-state-warning-signal/40 bg-state-warning-signal/10 px-3 py-2.5 text-[12.5px] leading-[17px] text-ink-100">
+      <label className="flex items-start gap-3 rounded-panel border border-state-warning-signal/20 bg-state-warning-signal/10 px-3 py-2.5 text-[12.5px] leading-[17px] text-ink-100">
         <input
           type="checkbox"
           checked={accepted}

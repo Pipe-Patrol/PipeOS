@@ -1,3 +1,4 @@
+import type { NoticeLevel } from '@/lib/notices'
 import type { Telemetry } from '@/robot/types'
 
 /**
@@ -51,11 +52,22 @@ export const RUN_STATE_PRESENTATION: Record<RunState, RunStatePresentation> = {
   },
 }
 
-/** A fault outranks a run in progress: the worse thing is the thing to show. */
-export function runStateOf(telemetry: Telemetry | null): RunState {
+/**
+ * A fault outranks a run in progress: the worse thing is the thing to show.
+ *
+ * `notice` is the worst thing the console itself is showing in the error bar,
+ * passed in so the bar and the strip above it can never disagree. It covers the
+ * failures the robot cannot report — a lost link, a request that was refused —
+ * which is exactly the set of faults telemetry goes quiet about.
+ */
+export function runStateOf(
+  telemetry: Telemetry | null,
+  notice: NoticeLevel | null = null,
+): RunState {
+  if (notice === 'fault') return 'fault'
   if (!telemetry) return 'idle'
   if (telemetry.alert?.level === 'critical') return 'fault'
-  if (telemetry.alert?.level === 'warning') return 'warning'
+  if (telemetry.alert?.level === 'warning' || notice === 'warning') return 'warning'
   if (telemetry.recording.active) return 'recording'
   if (telemetry.run.active) return 'active'
   return 'idle'

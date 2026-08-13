@@ -1,14 +1,34 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 
+import { DefectBox } from '@/components/overlay/DefectBox'
 import { Button } from '@/components/primitives/Button'
 import { EmptyState } from '@/components/primitives/EmptyState'
 import { Popover } from '@/components/primitives/Popover'
 import { ClockIcon } from '@/components/primitives/icons'
-import { DEFECT_GROUPS, DEFECT_TYPES, defectLabel } from '@/constants/defects'
+import { formatLatLon, project } from '@/components/map/geo'
+import {
+  DEFECT_GROUPS,
+  DEFECT_TYPES,
+  defectClassName,
+  defectLabel,
+} from '@/constants/defects'
 import * as format from '@/lib/format'
+import { clockFromRegion } from '@/lib/region'
 import { useTempUnit } from '@/lib/units'
 import type { RobotClient } from '@/robot/client'
 import type { ClimateReading, DefectRegion, Motion, Run } from '@/robot/types'
+
+/**
+ * What the panel opens already holding, when something else decided first.
+ *
+ * A box the model drew or an air spike both know what the defect is before the
+ * operator says so, and re-entering it by hand would be answering a question
+ * that has already been answered.
+ */
+export interface DefectPrefill {
+  code?: string
+  note?: string
+}
 
 interface DefectPanelProps {
   client: RobotClient
@@ -16,6 +36,11 @@ interface DefectPanelProps {
   motion: Motion
   /** Stamped onto the defect alongside the chainage. */
   climate: ClimateReading
+  /** True while the air is doing something sudden, so the reading reads red. */
+  spiking: boolean
+  /** Set when something else already decided what this defect is. */
+  prefill: DefectPrefill | null
+  onPrefillUsed: () => void
   /** Drawn on the live feed, not in here. Null until the operator marks one. */
   region: DefectRegion | null
   /**
@@ -24,22 +49,15 @@ interface DefectPanelProps {
    */
   regionMarkedAt: number
   onRegionChange: (region: DefectRegion | null) => void
-  /** Hands the feed over to the drawing overlay. */
-  onDrawRegion: () => void
+  /**
+   * Hands the feed over to the drawing overlay, telling it which class is
+   * selected so the box being dragged is already the colour it will be saved in.
+   */
+  onDrawRegion: (className: string, label: string) => void
   /** True while the operator is drawing on the feed rather than in here. */
   drawing: boolean
   onSaved: () => void
   onClose: () => void
-}
-
-/** Clock face 1..12 from where the box sits on the circular pipe view. */
-function clockFromRegion(region: DefectRegion): number {
-  const cx = region.x + region.w / 2
-  const cy = region.y + region.h / 2
-  let angle = Math.atan2(cx - 0.5, -(cy - 0.5)) // 0 at 12 o'clock, clockwise
-  if (angle < 0) angle += Math.PI * 2
-  const hour = Math.round((angle / (Math.PI * 2)) * 12) % 12
-  return hour === 0 ? 12 : hour
 }
 
 /**
@@ -60,6 +78,9 @@ export function DefectPanel({
   run,
   motion,
   climate,
+  spiking,
+  prefill,
+  onPrefillUsed,
   region,
   regionMarkedAt,
   onRegionChange,
@@ -68,9 +89,14 @@ export function DefectPanel({
   onSaved,
   onClose,
 }: DefectPanelProps) {
-  const [code, setCode] = useState(DEFECT_TYPES[0].code)
+  // Same shape as the note below: null means "nothing chosen here yet", so a
+  // prefilled class shows through until the operator picks one themselves.
+  const [code, setCode] = useState<string | null>(null)
   const [severity, setSeverity] = useState(3)
-  const [note, setNote] = useState('')
+  // Null until the operator types, so a note offered by a spike prompt can show
+  // through underneath without an effect having to copy it in — and the moment
+  // they type, what they wrote wins for good.
+  const [note, setNote] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -82,7 +108,27 @@ export function DefectPanel({
     return () => clearInterval(timer)
   }, [])
 
+
+  const noteValue = note ?? prefill?.note ?? ''
+  const codeValue = code ?? prefill?.code ?? DEFECT_TYPES[0].code
   const clock = region ? clockFromRegion(region) : null
+  const className = defectClassName(codeValue)
+  const draw = () => onDrawRegion(className, defectLabel(codeValue))
+
+  /**
+   * Where this is, on the earth.
+   *
+   * There is no GPS on the robot and there could not be one down a pipe, so
+   * this is computed rather than received: the operator placed the entry point
+   * and said which way the robot faced, and the odometer says how far along
+   * that heading it has crawled. Projecting one through the other is the only
+   * coordinate this system can produce, and it is the one that goes in a
+   * report. Without an origin there is nothing to project from and it stays a
+   * blank rather than inventing a position.
+   */
+  const gps = run?.origin
+    ? project(run.origin, motion.position.x, motion.position.y)
+    : null
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -93,15 +139,17 @@ export function DefectPanel({
       await client.request(`/api/runs/${run.id}/defects`, {
         method: 'POST',
         body: JSON.stringify({
-          code,
+          code: codeValue,
           severity,
           clock_position: clock,
-          note: note.trim(),
+          note: noteValue.trim(),
           with_snapshot: true,
           region,
         }),
       })
-      setNote('')
+      setNote(null)
+      setCode(null)
+      onPrefillUsed()
       onRegionChange(null)
       onSaved()
     } catch (caught) {
@@ -126,9 +174,9 @@ export function DefectPanel({
           <span className="label">Observation</span>
           <div className="flex items-center gap-2">
             <select
-              value={code}
+              value={codeValue}
               onChange={(event) => setCode(event.target.value)}
-              className="h-9 min-w-0 flex-1 rounded-panel border border-ink-800 bg-white/5 px-2 text-[13px] text-ink-100 focus:border-white/35 focus:outline-none"
+              className="h-9 min-w-0 flex-1 rounded-panel border border-ink-800 bg-white/5 px-2 text-[13px] text-ink-100 focus:border-white/20 focus:outline-none"
             >
               {DEFECT_GROUPS.map((group) => (
                 <optgroup key={group} label={group}>
@@ -161,8 +209,8 @@ export function DefectPanel({
                   className={`h-8 flex-1 rounded-panel border text-[12px] transition-colors ${
                     selected
                       ? danger
-                        ? 'border-state-fault-signal bg-state-fault-signal/25 text-state-fault-signal'
-                        : 'border-white/40 bg-white/22 text-white'
+                        ? 'border-state-fault-signal/35 bg-state-fault-signal/25 text-state-fault-signal'
+                        : 'border-white/30 bg-white/22 text-white'
                       : 'border-ink-800 text-ink-400 hover:bg-white/8'
                   }`}
                 >
@@ -178,27 +226,23 @@ export function DefectPanel({
           {region ? (
             <>
               <div className="relative aspect-[4/3] w-full overflow-hidden rounded-panel border border-ink-800 bg-black">
+                {/* A still, not the stream. Pointing this at /api/camera left
+                    a live feed sitting under the box: the picture drifted on
+                    as the robot crawled while the box stayed put, so the
+                    preview showed the box over the wrong pipe. */}
                 <img
                   key={regionMarkedAt}
-                  src={client.cameraUrl(regionMarkedAt)}
+                  src={client.stillUrl(regionMarkedAt)}
                   alt="The frame this defect is filed against"
                   draggable={false}
                   className="h-full w-full object-cover"
                 />
-                <div
-                  className="absolute border-2 border-state-fault-signal"
-                  style={{
-                    left: `${region.x * 100}%`,
-                    top: `${region.y * 100}%`,
-                    width: `${region.w * 100}%`,
-                    height: `${region.h * 100}%`,
-                  }}
-                />
+                <DefectBox rect={region} label={className} />
               </div>
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={onDrawRegion}
+                  onClick={draw}
                   className="rounded-sm border border-ink-800 px-2 py-1 text-[11px] text-ink-400 hover:bg-white/10 hover:text-ink-100"
                 >
                   Redraw box
@@ -215,7 +259,7 @@ export function DefectPanel({
           ) : (
             <button
               type="button"
-              onClick={onDrawRegion}
+              onClick={draw}
               className="flex aspect-[4/3] w-full items-center justify-center rounded-panel border border-dashed border-ink-700 bg-white/2 text-[12px] text-ink-400 transition-colors hover:border-ink-500 hover:bg-white/6 hover:text-ink-100"
             >
               Click here to draw box
@@ -226,29 +270,36 @@ export function DefectPanel({
         <label className="flex flex-col gap-1.5">
           <span className="label">Note</span>
           <textarea
-            value={note}
+            value={noteValue}
             onChange={(event) => setNote(event.target.value)}
             rows={2}
-            className="resize-none rounded-panel border border-ink-800 bg-white/5 px-2 py-1.5 text-[13px] text-ink-100 placeholder:text-ink-500 focus:border-white/35 focus:outline-none"
+            className="resize-none rounded-panel border border-ink-800 bg-white/5 px-2 py-1.5 text-[13px] text-ink-100 placeholder:text-ink-500 focus:border-white/20 focus:outline-none"
             placeholder="Optional"
           />
         </label>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-panel border border-ink-800 bg-white/2 p-3">
-          <Info label="GPS coordinates" value={format.BLANK} />
-          <Info
-            label="Clock position"
+        {/* Rows, not a grid of cards. Everything here is stamped automatically
+            and read at a glance rather than filled in, so it earns one line
+            each — the panel is competing with the video for height. */}
+        <dl className="flex flex-col rounded-panel border border-ink-800 bg-white/2 px-2.5 py-1.5">
+          <Row label="Distance" value={format.metres(motion.chainage_m)} />
+          <Row label="GPS" value={formatLatLon(gps)} />
+          <Row
+            label="Clock"
             value={clock ? `${clock} o'clock` : format.BLANK}
-            icon={<ClockIcon size={11} />}
+            icon={<ClockIcon size={10} />}
           />
-          <Info label="Distance from entry" value={format.metres(motion.chainage_m)} />
-          <Info label="Time logged" value={new Date(now).toLocaleTimeString()} />
-          <Info
-            label="Temperature"
-            value={format.temperature(climate.temperature_c, unit)}
+          <Row
+            label="Air"
+            value={`${format.temperature(climate.temperature_c, unit)}  ·  ${format.percent(
+              climate.humidity_pct,
+            )}`}
+            // Red while the air is doing something sudden, matching the
+            // readout on the video and the line in the notice bar.
+            alarm={spiking}
           />
-          <Info label="Humidity" value={format.percent(climate.humidity_pct)} />
-        </div>
+          <Row label="Logged" value={new Date(now).toLocaleTimeString()} />
+        </dl>
 
         {error && <p className="text-[12px] text-state-fault-signal">{error}</p>}
 
@@ -257,45 +308,34 @@ export function DefectPanel({
         </Button>
       </form>
 
-      {run.defects.length > 0 && (
-        <section className="mt-4 border-t border-ink-800 pt-3">
-          <h3 className="label mb-2">This run — {run.defects.length}</h3>
-          <ul className="flex flex-col gap-1">
-            {[...run.defects].reverse().map((defect) => (
-              <li
-                key={defect.id}
-                className="grid grid-cols-[1fr_auto_auto] items-baseline gap-3 text-[12px]"
-              >
-                <span className="truncate text-ink-100">{defectLabel(defect.code)}</span>
-                <span className="text-ink-500">S{defect.severity}</span>
-                <span className="tnum text-ink-400">
-                  {format.metres(defect.chainage_m)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
     </Popover>
   )
 }
 
-function Info({
+function Row({
   label,
   value,
   icon,
+  alarm = false,
 }: {
   label: string
   value: string
   icon?: ReactNode
+  alarm?: boolean
 }) {
   return (
-    <div className="min-w-0">
-      <dt className="label flex items-center gap-1">
+    <div className="flex items-baseline justify-between gap-3 py-[3px]">
+      <dt className="label flex shrink-0 items-center gap-1">
         {icon}
         {label}
       </dt>
-      <dd className="mt-0.5 truncate text-[12px] tnum text-ink-200">{value}</dd>
+      <dd
+        className={`truncate text-[12px] tnum ${
+          alarm ? 'font-semibold text-state-fault-signal' : 'text-ink-200'
+        }`}
+      >
+        {value}
+      </dd>
     </div>
   )
 }

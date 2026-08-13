@@ -1,7 +1,15 @@
-# PipeOS control server
+# PipeOS control server -- the part that runs anywhere.
 #
-# Install into a venv created with --system-site-packages, so picamera2 and the
-# apt-managed GPIO libraries stay visible. See docs/HARDWARE.md.
+# Everything here installs on a Mac, a Linux box or the Pi with no compiler and
+# no hardware present. That is the point of the split: the console, the run
+# store, the API and the tests are all exercised on a laptop, and a laptop must
+# not have to build a GPIO driver to run them.
+#
+#   requirements-pi.txt      the robot's hardware: GPIO, the IMU. Pi only.
+#   requirements-detect.txt  serving the defect model. Laptop only.
+#
+# On the Pi, install into a venv created with --system-site-packages so
+# picamera2 and the apt-managed libraries stay visible. See docs/HARDWARE.md.
 #
 # NOT installable with pip on Raspberry Pi OS -- use apt for these:
 #   sudo apt install python3-picamera2 python3-gpiozero python3-lgpio
@@ -15,14 +23,13 @@ uvicorn[standard]==0.34.0
 websockets==14.1
 pydantic==2.10.4
 
-# GPIO. gpiozero needs lgpio as its pin factory on the Pi 5; RPi.GPIO does not
-# work there. Both usually come from apt already -- these are the fallback.
-gpiozero==2.0.1
-lgpio==0.2.2.0
-
-# BNO085 IMU over I2C.
-adafruit-blinka==8.51.0
-adafruit-circuitpython-bno08x==1.2.4
+# NO onnxruntime, AND THAT IS THE POINT. The defect model does not run on the
+# robot: RF-DETR on a Pi 5 is seconds per frame with the cores pinned and the
+# board hot, and between the runtime and the graph it costs most of a gigabyte
+# of SD card for the privilege. The robot posts frames to a laptop instead and
+# needs nothing but the standard library to do it -- see perception/remote.py.
+#
+# To serve the model from a laptop:  pip install -r requirements-detect.txt
 
 # Tests. Safety and estimator tests need no hardware and run anywhere.
 pytest==8.3.4

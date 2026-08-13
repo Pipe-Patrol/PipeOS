@@ -19,8 +19,23 @@ interface GalleryPanelProps {
  * the shot they just took — usually to confirm it is not motion-blurred before
  * driving on past whatever it was of.
  */
+/**
+ * Six rows of three, and no more.
+ *
+ * A long run puts a hundred stills in here, and an unbounded grid turns the
+ * panel into a page — it grows until it is capped by the feed and then becomes
+ * a long scroll nobody reads to the end of. Six rows is enough to find the shot
+ * just taken, which is what this panel is for; the rest of the roll lives on
+ * the run page, which is built to hold it.
+ */
+const COLUMNS = 3
+const MAX_ROWS = 6
+const LIMIT = COLUMNS * MAX_ROWS
+
 export function GalleryPanel({ client, run, onClose }: GalleryPanelProps) {
-  const snapshots = run ? [...run.snapshots].reverse() : []
+  const all = run ? [...run.snapshots].reverse() : []
+  const snapshots = all.slice(0, LIMIT)
+  const hidden = all.length - snapshots.length
 
   return (
     <Popover title="Camera roll" onClose={onClose}>
@@ -32,7 +47,7 @@ export function GalleryPanel({ client, run, onClose }: GalleryPanelProps) {
         <>
           <ul className="grid grid-cols-3 gap-1.5">
             {snapshots.map((snapshot) => (
-              <li key={snapshot.id}>
+              <li key={snapshot.id} className="relative">
                 <img
                   src={client.mediaUrl(
                     `/api/runs/${run.id}/snapshots/${snapshot.file}`,
@@ -41,7 +56,10 @@ export function GalleryPanel({ client, run, onClose }: GalleryPanelProps) {
                   loading="lazy"
                   className="aspect-[4/3] w-full rounded-sm border border-ink-800 object-cover"
                 />
-                <span className="label mt-1 block text-center">
+                {/* Inside the frame, not under it. A caption on its own line
+                    costs a row of height per row of pictures, and the panel is
+                    competing with the video for every pixel. */}
+                <span className="overlay-shadow absolute right-1 bottom-1 rounded-[3px] bg-ink-1000/75 px-1 text-[9px] leading-[13px] font-semibold tnum text-ink-0">
                   {format.metres(snapshot.chainage_m)}
                 </span>
               </li>
@@ -52,7 +70,7 @@ export function GalleryPanel({ client, run, onClose }: GalleryPanelProps) {
             to={`/runs/${run.id}`}
             className="mt-3 block text-center text-[11px] text-ink-500 underline underline-offset-2 hover:text-ink-100"
           >
-            Open the full run
+            {hidden > 0 ? `Open the full run — ${hidden} more` : 'Open the full run'}
           </Link>
         </>
       )}

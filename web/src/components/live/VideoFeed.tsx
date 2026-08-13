@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { clampZoom } from '@/components/live/ZoomControl'
+import { useTempTestFrame } from '@/dev/useTempTestFrame'
 import type { RobotClient } from '@/robot/client'
 
 interface VideoFeedProps {
@@ -67,10 +68,14 @@ function clampOffset(offset: Offset, scale: number, width: number, height: numbe
  *
  * The stale treatment matters more than it looks. A dropped MJPEG stream leaves
  * the last frame painted, and a frozen frame is indistinguishable from a live
- * one showing a stationary robot. Dimming it, and saying so, is the only signal
- * there is.
+ * one showing a stationary robot. So it is dimmed almost to black — far enough
+ * that it cannot be mistaken for a picture, which is the whole point. It is not
+ * labelled: the words go to the notice bar above the status bar with every
+ * other fault, and a caption in the middle of the glass would be the one
+ * exception to that rule.
  */
 export function VideoFeed({ client, zoom, onZoom, stale }: VideoFeedProps) {
+  const supplied = useTempTestFrame()
   const [nonce, setNonce] = useState(() => Date.now())
   const [failed, setFailed] = useState(false)
   const [offset, setOffset] = useState<Offset>({ x: 0, y: 0 })
@@ -217,8 +222,8 @@ export function VideoFeed({ client, zoom, onZoom, stale }: VideoFeedProps) {
     >
       {!failed && (
         <img
-          key={nonce}
-          src={client.cameraUrl(nonce)}
+          key={supplied ? 'supplied' : nonce}
+          src={supplied ?? client.cameraUrl(nonce)}
           alt=""
           draggable={false}
           onError={() => setFailed(true)}
@@ -227,18 +232,12 @@ export function VideoFeed({ client, zoom, onZoom, stale }: VideoFeedProps) {
             transformOrigin: '0 0',
           }}
           className={`h-full w-full object-cover transition-opacity duration-200 ${
-            stale ? 'opacity-40' : 'opacity-100'
+            stale ? 'opacity-[0.12]' : 'opacity-100'
           }`}
         />
       )}
 
       {failed && <p className="label text-[11px] tracking-[0.14em]">no camera feed</p>}
-
-      {stale && !failed && (
-        <p className="absolute rounded-panel border border-state-fault-signal/60 bg-ink-1000/70 px-3 py-1.5 text-[12px] tracking-[0.1em] text-state-fault-signal uppercase">
-          Link lost — frame is not live
-        </p>
-      )}
     </div>
   )
 }

@@ -14,7 +14,12 @@ import { defineConfig } from 'vitest/config'
 // Temporary testing (../temptest). The path is computed, not required to exist:
 // if the folder is deleted the dev import just 404s and the double-tap-T
 // gesture goes inert. See web/src/dev/tempTest.ts and temptest/README.md.
+// Where the local pipepatrol server is, for the dev proxy below. Override with
+// PIPEPATROL_SERVER to point the dev console at a robot on the network instead.
+const DEV_SERVER = process.env.PIPEPATROL_SERVER ?? 'http://127.0.0.1:8000'
+
 const temptestSim = fileURLToPath(new URL('../temptest/sim.ts', import.meta.url))
+const modelLab = fileURLToPath(new URL('../temptest/model-lab.html', import.meta.url))
 const sampleFrame = fileURLToPath(new URL('../temptest/sample-pipe.jpg', import.meta.url))
 
 /**
@@ -38,6 +43,22 @@ function simMediaPlugin(): Plugin {
     name: 'temptest-sim-media',
     apply: 'serve',
     configureServer(server) {
+      // The model lab: /model-lab, straight out of temptest. It exists because
+      // the console can only show detections inside a run, and a run needs
+      // preflight, which needs hardware a laptop does not have — so there was
+      // no way to answer "does the model work" without a robot.
+      server.middlewares.use(async (req, res, next) => {
+        if (!req.url || req.url.split('?')[0] !== '/model-lab') return next()
+        try {
+          const page = await readFile(modelLab)
+          res.setHeader('Content-Type', 'text/html; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(page)
+        } catch {
+          next()
+        }
+      })
+
       server.middlewares.use(async (req, res, next) => {
         if (!req.url || !wantsFrame(req.url)) return next()
         try {
@@ -64,6 +85,26 @@ export default defineConfig({
   server: {
     // Let the dev server serve ../temptest, which sits outside web/.
     fs: { allow: ['..'] },
+    /**
+     * ONE ADDRESS IN DEVELOPMENT. The console used to run on 5173 and the
+     * server on 8000, so working on a laptop meant "connect to a robot" at a
+     * second address before anything — including the defect model — would
+     * answer. Proxied, 5173 *is* the robot: same origin for the API, the
+     * telemetry socket, the demo day panel and the model.
+     *
+     * So the rule is simply where the server is running. No robot on the
+     * network: run the server locally (`.venv/bin/python -m pipepatrol` in
+     * server/) and the model runs on this laptop. On a real robot: connect to
+     * the Pi's address and everything, model included, runs there.
+     *
+     * Only these prefixes. A blanket proxy would send the app's own routes to
+     * the server as well.
+     */
+    proxy: {
+      '/api': { target: DEV_SERVER, changeOrigin: true },
+      '/ws': { target: DEV_SERVER, ws: true, changeOrigin: true },
+      '/demo-panel': { target: DEV_SERVER, changeOrigin: true },
+    },
   },
   build: {
     // The server serves this directory. config.py's WEB_DIST points at it.

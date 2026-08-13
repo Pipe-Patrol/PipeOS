@@ -17,6 +17,17 @@ import type { RunSummary } from '@/robot/types'
  * ended usually means a power cut mid-inspection, and the video and defects up
  * to that moment are still there.
  */
+/**
+ * The column widths, shared by the header and every row so they cannot drift.
+ *
+ * The name is the only fluid column; everything else is sized to its content
+ * and fixed. Date and ID get the width their longest value actually needs, and
+ * the four figures get one width between them so the numbers line up as a
+ * block — which is the point of a table of numbers.
+ */
+const COLUMNS =
+  'grid grid-cols-[minmax(140px,1fr)_150px_100px_repeat(4,84px)] gap-x-5'
+
 export function RunsRoute() {
   const { client } = useRobot()
   const [runs, setRuns] = useState<RunSummary[] | null>(null)
@@ -51,13 +62,14 @@ export function RunsRoute() {
         <EmptyState title="No runs yet" />
       ) : (
         <div className="panel overflow-hidden">
-          <div className="grid grid-cols-[1fr_112px_repeat(4,minmax(80px,auto))] gap-x-4 border-b border-ink-800 px-4 py-2">
+          <div className={`${COLUMNS} border-b border-ink-800 px-4 py-2`}>
             <span className="label">Run</span>
+            <span className="label">Date</span>
             <span className="label">ID</span>
             <span className="label text-right">Distance</span>
             <span className="label text-right">Duration</span>
             <span className="label text-right">Defects</span>
-            <span className="label text-right">Frames</span>
+            <span className="label text-right">Captures</span>
           </div>
 
           <ul className="divide-y divide-ink-800">
@@ -65,20 +77,19 @@ export function RunsRoute() {
               <li key={run.id}>
                 <Link
                   to={`/runs/${run.id}`}
-                  className="grid h-14 grid-cols-[1fr_112px_repeat(4,minmax(80px,auto))] items-center gap-x-4 px-4 hover:bg-white/5"
+                  className={`${COLUMNS} h-12 items-center px-4 hover:bg-white/5`}
                 >
-                  <span className="min-w-0">
-                    <span className="block truncate text-[13px] text-ink-100">
-                      {run.name}
-                    </span>
-                    <span className="block truncate text-[11px] text-ink-500">
-                      {format.timestamp(run.started_at)}
-                      {run.interrupted && (
-                        <span className="ml-2 text-state-warning-signal">
-                          interrupted
-                        </span>
-                      )}
-                    </span>
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="truncate text-[13px] text-ink-100">{run.name}</span>
+                    {run.interrupted && (
+                      <span className="shrink-0 text-[11px] text-state-warning-signal">
+                        interrupted
+                      </span>
+                    )}
+                  </span>
+
+                  <span className="tnum truncate text-[12px] text-ink-400">
+                    {format.timestamp(run.started_at)}
                   </span>
 
                   <span className="tnum truncate text-[11px] text-ink-500">

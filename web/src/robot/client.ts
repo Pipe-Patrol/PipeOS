@@ -91,6 +91,18 @@ export class RobotClient {
     return `${this.httpBase}/api/camera?t=${nonce}`
   }
 
+  /**
+   * One frame, frozen. Not the stream.
+   *
+   * `at` is the moment being frozen, and it is the whole point: the same
+   * timestamp keeps resolving to the same picture out of cache, so a preview of
+   * the frame a defect was filed against stays that frame instead of drifting
+   * into a live view of wherever the robot has got to since.
+   */
+  stillUrl(at: number | string): string {
+    return `${this.httpBase}/api/camera/still?t=${at}`
+  }
+
   mediaUrl(path: string): string {
     return `${this.httpBase}${path}`
   }

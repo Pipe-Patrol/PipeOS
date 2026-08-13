@@ -94,7 +94,7 @@ export function ConnectRoute() {
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Basement crawler"
-            className="h-9 rounded-panel border border-ink-800 bg-white/5 px-3 text-[13px] text-ink-100 placeholder:text-ink-500 focus:border-white/35 focus:outline-none"
+            className="h-9 rounded-panel border border-ink-800 bg-white/5 px-3 text-[13px] text-ink-100 placeholder:text-ink-500 focus:border-white/20 focus:outline-none"
           />
         </label>
 
@@ -105,7 +105,7 @@ export function ConnectRoute() {
             onChange={(event) => setAddress(event.target.value)}
             placeholder="pipepatrol.local:8000"
             aria-label="Robot address"
-            className="h-9 rounded-panel border border-ink-800 bg-white/5 px-3 text-[13px] text-ink-100 placeholder:text-ink-500 focus:border-white/35 focus:outline-none"
+            className="h-9 rounded-panel border border-ink-800 bg-white/5 px-3 text-[13px] text-ink-100 placeholder:text-ink-500 focus:border-white/20 focus:outline-none"
           />
         </label>
 

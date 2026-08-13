@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from pipepatrol.runs import export
-from pipepatrol.runs.models import Defect, Run
+from pipepatrol.runs import export, recorder
+from pipepatrol.runs.models import Defect, Recording, Run
 from pipepatrol.runs.store import RunStore
 
 
@@ -76,6 +76,38 @@ class TestDefects:
         assert store.delete_defect(run.id, defect.id) is False
 
 
+class TestRecordings:
+    """A run may hold several clips. It used to keep only the last one."""
+
+    def test_every_clip_is_kept(self, store):
+        run = store.create("run")
+        store.add_recording(run.id, Recording(file="video.mjpeg", frames=10))
+        store.add_recording(run.id, Recording(file="video-2.mjpeg", frames=20))
+
+        reloaded = store.get(run.id)
+        assert [r.file for r in reloaded.recordings] == ["video.mjpeg", "video-2.mjpeg"]
+        assert reloaded.summary()["recording_count"] == 2
+
+    def test_clips_get_their_own_files(self):
+        assert recorder._clip_files(1) == ("video.mjpeg", "video.index.json")
+        assert recorder._clip_files(2) == ("video-2.mjpeg", "video-2.index.json")
+        # The first clip keeps the original names, so runs recorded before
+        # multi-clip support still resolve.
+        assert recorder._clip_files(1)[0] == recorder.VIDEO_FILE
+
+    def test_a_run_stored_with_one_recording_still_loads(self, store):
+        """The old single-clip shape on disk reads back as a one-item list."""
+        run = store.create("run")
+        path = store.run_dir(run.id) / "run.json"
+        data = json.loads(path.read_text())
+        data.pop("recordings", None)
+        data["recording"] = {"file": "video.mjpeg", "index_file": "video.index.json"}
+        path.write_text(json.dumps(data))
+
+        reloaded = store.get(run.id)
+        assert [r.file for r in reloaded.recordings] == ["video.mjpeg"]
+
+
 class TestSnapshots:
     def test_written_to_disk_and_indexed(self, store):
         run = store.create("run")
@@ -138,9 +170,14 @@ class TestExport:
         )
 
         text = export.to_csv(run).decode()
+        header, row = text.splitlines()[0], text.splitlines()[1]
 
-        assert "chainage_uncertainty_m" not in text
-        assert "1.5" not in text
+        assert "chainage_uncertainty_m" not in header
+        # Checked per field rather than as a substring of the whole row: the
+        # first column is a timestamp, and an epoch second beginning "1.5" made
+        # this fail roughly one run in ten for a reason that had nothing to do
+        # with the uncertainty.
+        assert "1.5" not in row.split(",")
 
     def test_the_uncertainty_is_still_in_the_json(self):
         run = Run(name="run")

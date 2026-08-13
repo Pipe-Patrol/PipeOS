@@ -56,7 +56,7 @@ export function PathMap({
         }`}
         style={bare ? undefined : { height }}
       >
-        <p className="label">no track yet — start driving</p>
+        <p className="label">Start a run to begin</p>
       </div>
     )
   }
