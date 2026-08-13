@@ -325,3 +325,48 @@ class TestDetectorHost:
             assert body["url"] == ""
             assert body["available"] is False
             assert "detection host" in body["error"]
+
+
+class TestDetectorModel:
+    """The console's model button, and the wire behind it.
+
+    The robot holds no model, so switching one is a message passed to the
+    detection host. Every failure on that path has to leave a robot that still
+    drives and a console that says which end went wrong.
+    """
+
+    @pytest.fixture
+    def client(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(config, "DETECTOR_HOST_FILE", tmp_path / "detector-host.txt")
+        monkeypatch.setattr(config, "DETECTOR_URL", "")
+        with TestClient(app) as client:
+            # A port nothing listens on, so the connection is refused at once.
+            # An unroutable address would test the same paths but pay the full
+            # 15 s timeout for each of them.
+            client.post("/api/detector-host", json={"url": "127.0.0.1:9"})
+            yield client
+
+    def test_switching_without_a_host_is_refused_with_a_reason(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(config, "DETECTOR_HOST_FILE", tmp_path / "none.txt")
+        monkeypatch.setattr(config, "DETECTOR_URL", "")
+        monkeypatch.setattr(config, "ALLOW_LOCAL_MODEL", False)
+
+        with TestClient(app) as client:
+            client.post("/api/detector-host", json={"url": ""})
+            response = client.post("/api/detector-model", json={"id": "rfdetr-onnx"})
+
+        assert response.status_code == 409
+        assert "detection host" in response.json()["error"]
+
+    def test_an_unreachable_host_reports_the_network_not_the_model(self, client):
+        # Nothing is listening there, which is the point.
+        response = client.post("/api/detector-model", json={"id": "rfdetr-torch"})
+        assert response.status_code == 502
+        assert "cannot reach" in response.json()["error"]
+
+    def test_the_catalogue_degrades_to_empty_rather_than_failing(self, client):
+        body = client.get("/api/detector-model").json()
+        assert body["models"] == []
+        assert body["error"]

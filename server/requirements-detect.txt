@@ -22,3 +22,14 @@ onnxruntime==1.20.1
 # camera and the optical-flow odometry; a laptop serving the model needs its own.
 opencv-python-headless==4.10.0.84
 numpy==1.26.4
+
+# The torch model (catalogue id `rfdetr-torch`) and the anomaly bank. Several
+# gigabytes, and only needed to serve that one -- the ONNX model above needs
+# none of it. Install if you want to switch to it from the console:
+#
+#   .venv/bin/pip install rfdetr torch torchvision pillow
+#   export PIPEPATROL_WEIGHTS=~/Downloads/checkpoint_best_total.pth
+#   export PIPEPATROL_ANOMALY_BANK=~/Downloads/clean-pipe.npz   # optional
+#
+# Deliberately not pinned here: they are large, optional, and pinning them
+# would make every detection host pay to install them.

@@ -256,3 +256,66 @@ def _now():
     import time
 
     return time.time()
+
+
+class TestModelSwitching:
+    """Choosing a model is a button, and the wire behind it runs to the host.
+
+    The robot holds no model, so switching one means telling the detection host
+    to load a different graph. It goes through the robot rather than the console
+    calling the host directly, which keeps one address for an operator to know.
+    """
+
+    def test_the_catalogue_comes_back_from_the_host(self, monkeypatch):
+        _responding(
+            monkeypatch,
+            {
+                "model_id": "rfdetr-onnx",
+                "models": [
+                    {"id": "rfdetr-onnx", "label": "RF-DETR", "selected": True},
+                    {"id": "rfdetr-torch", "label": "RF-DETR + anomaly", "selected": False},
+                ],
+            },
+        )
+
+        answer = RemoteDetector("10.0.0.4").models()
+
+        assert [m["id"] for m in answer["models"]] == ["rfdetr-onnx", "rfdetr-torch"]
+
+    def test_selecting_posts_the_id(self, monkeypatch):
+        sent = _responding(monkeypatch, {"ok": True, "model_id": "rfdetr-torch"})
+
+        RemoteDetector("10.0.0.4").select_model("rfdetr-torch")
+
+        assert sent["url"] == "http://10.0.0.4:8600/api/model"
+        assert json.loads(sent["body"]) == {"id": "rfdetr-torch"}
+
+    def test_a_refusal_keeps_its_reason(self, monkeypatch):
+        """The host is the end that knows what is installed."""
+        _responding(
+            monkeypatch,
+            raises=urllib.error.HTTPError(
+                "http://10.0.0.4:8600/api/model",
+                409,
+                "Conflict",
+                {},
+                BytesIO(b'{"error": "no checkpoint at /w.pth", "kept": "rfdetr-onnx"}'),
+            ),
+        )
+
+        answer = RemoteDetector("10.0.0.4").select_model("rfdetr-torch")
+
+        assert answer["error"] == "no checkpoint at /w.pth"
+        # And the host kept serving what it had, rather than dropping detection
+        # mid-survey for a model that is not there.
+        assert answer["kept"] == "rfdetr-onnx"
+
+    def test_an_unreachable_host_answers_nothing_rather_than_raising(self, monkeypatch):
+        _responding(monkeypatch, raises=urllib.error.URLError("asleep"))
+        detector = RemoteDetector("10.0.0.4")
+
+        assert detector.select_model("rfdetr-torch") is None
+        assert "cannot reach" in detector.error
+
+    def test_a_host_with_no_address_is_not_asked(self):
+        assert RemoteDetector("").models() is None

@@ -1,7 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { Row, Section } from '@/components/settings/controls'
 import { useRobot } from '@/robot/RobotProvider'
+
+interface ModelChoice {
+  id: string
+  label: string
+  note: string
+  available: boolean
+  error: string | null
+  selected: boolean
+}
+
+interface ModelCatalogue {
+  models: ModelChoice[]
+  model_id?: string | null
+  error?: string | null
+}
 
 interface DetectorHost {
   /** In force now: the operator's override if there is one, else `deployed`. */
@@ -124,7 +139,100 @@ export function DetectionHost() {
           {statusLine(host, failure)}
         </span>
       </Row>
+
+      <ModelPicker enabled={healthy} />
     </Section>
+  )
+}
+
+/**
+ * Which model the detection host is running, as a choice rather than a config file.
+ *
+ * There are two trained things that can look at a frame and they are not
+ * interchangeable enough to pick automatically — one is the exported graph that
+ * has been down a pipe, the other is newer, heavier, and can flag conditions
+ * outside the seven classes. Which is right depends on what the run is for, so
+ * an operator picks, here, with a button.
+ *
+ * IT SWITCHES THE HOST, NOT THE ROBOT. The robot holds no model; it posts frames
+ * and draws what comes back. So this reaches the laptop through the robot, which
+ * keeps the operator with one address to know rather than two.
+ *
+ * A model that is not installed is shown and disabled rather than hidden, with
+ * the reason on hover. Hiding it makes a checkpoint someone forgot to copy look
+ * like a model that does not exist.
+ */
+function ModelPicker({ enabled }: { enabled: boolean }) {
+  const { client } = useRobot()
+  const [catalogue, setCatalogue] = useState<ModelCatalogue | null>(null)
+  const [switching, setSwitching] = useState<string | null>(null)
+  const [failure, setFailure] = useState<string | null>(null)
+
+  const load = useCallback(() => {
+    if (!client) return
+    client
+      .request<ModelCatalogue>('/api/detector-model')
+      .then(setCatalogue)
+      .catch(() => setCatalogue(null))
+  }, [client])
+
+  useEffect(() => {
+    if (enabled) load()
+  }, [enabled, load])
+
+  if (!client || !enabled || !catalogue || catalogue.models.length === 0) return null
+
+  const choose = async (id: string) => {
+    setSwitching(id)
+    setFailure(null)
+    try {
+      await client.request('/api/detector-model', {
+        method: 'POST',
+        body: JSON.stringify({ id }),
+      })
+      load()
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : 'could not switch')
+    } finally {
+      setSwitching(null)
+    }
+  }
+
+  return (
+    <div className="px-4 py-3">
+      <div className="label mb-2">Model</div>
+      <ul className="flex flex-col gap-1">
+        {catalogue.models.map((model) => (
+          <li key={model.id}>
+            <button
+              type="button"
+              disabled={!model.available || switching !== null}
+              onClick={() => void choose(model.id)}
+              title={model.error ?? model.note}
+              aria-pressed={model.selected}
+              className={`w-full rounded-sm border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+                model.selected
+                  ? 'border-white/30 bg-white/8'
+                  : 'border-white/10 hover:border-white/20 hover:bg-white/5'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-[13px] text-ink-100">{model.label}</span>
+                {model.selected && (
+                  <span className="label text-ink-400">
+                    {switching === model.id ? 'Switching…' : 'Running'}
+                  </span>
+                )}
+              </div>
+              <div className="mt-0.5 text-[11.5px] text-ink-400">
+                {model.available ? model.note : (model.error ?? 'Not installed')}
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {failure && <div className="mt-2 text-[11.5px] text-ink-400">{failure}</div>}
+    </div>
   )
 }
 

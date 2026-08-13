@@ -116,6 +116,45 @@ class RemoteDetector:
         self.error = None
         return _parse(payload)
 
+    def models(self):
+        """The host's catalogue, or None if it cannot be asked.
+
+        The console's model buttons are drawn from this. It goes through the
+        robot rather than the console talking to the host directly, so there
+        stays exactly one address an operator has to know -- the robot's.
+        """
+        return self._json("GET", "/api/models")
+
+    def select_model(self, model_id):
+        """Tell the host to load a different model. Returns its answer, or None."""
+        return self._json("POST", "/api/model", json.dumps({"id": model_id}).encode())
+
+    def _json(self, method, path, body=None):
+        if not self.available:
+            return None
+
+        request = urllib.request.Request(
+            f"{self.url}{path}",
+            data=body,
+            headers={"Content-Type": "application/json"} if body else {},
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            # A refusal carries the reason -- "no checkpoint at ..." -- and that
+            # is the useful half, so it is parsed rather than discarded.
+            try:
+                return json.loads(exc.read())
+            except Exception:  # noqa: BLE001 - diagnostics must not raise
+                self.error = f"detection host {self.url}: HTTP {exc.code}"
+                return None
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            self.error = f"cannot reach detection host {self.url}: {exc}"
+            log.warning("%s", self.error)
+            return None
+
     def status(self):
         return {
             "backend": self.name,

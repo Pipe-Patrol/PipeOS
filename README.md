@@ -81,6 +81,13 @@ it can actually be reached — so a laptop on the wrong network is caught during
 the deploy rather than mid-inspection. Change the address later without
 redeploying in **Settings → Detection host**.
 
+**Two models, one button.** `rfdetr-onnx` is the exported graph — quick, no
+torch, and the one that has been down a pipe. `rfdetr-torch` is the newer
+checkpoint under torch, with an optional clean-pipe bank that flags conditions
+outside the seven classes as `UNKNOWN`; it is not QC'd yet. Switch between them
+in **Settings → Detection host → Model**. The button switches the laptop, not
+the robot, and one that is not installed is shown greyed with the reason.
+
 Without a reachable host the robot still drives, records and logs defects by
 hand; it just detects nothing. See [MODEL.md](MODEL.md) for the class list and
 the details.
@@ -97,17 +104,10 @@ sudo apt install -y python3-opencv
 sudo systemctl restart pipepatrol
 ```
 
-Turning on the **IMU**:
+Turning on the **IMU and cliamte**:
 ```
 sudo apt install -y python3-opencv
 sudo raspi-config nonint do_i2c 0
-sudo reboot
-```
-
-Turning on the **climate**:
-```
-sudo raspi-config nonint do_i2c 0
-sudo reboot
 ```
 
 If you want to stop entering the password multiple times during deployment, open a new terminal, and run ```ssh-copy-id pipepatrol@pipepatrol.local```.

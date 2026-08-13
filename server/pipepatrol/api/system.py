@@ -10,15 +10,21 @@ what the operator sees without a frontend release.
 """
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from pipepatrol import __version__, config
 from pipepatrol.api.deps import get_robot
 from pipepatrol.hardware import host
-from pipepatrol.perception import detector_for
+from pipepatrol.perception import RemoteDetector, detector_for
 from pipepatrol.perception.remote import normalise_url
 
 router = APIRouter()
+
+
+class ModelRequest(BaseModel):
+    # A catalogue id: "rfdetr-onnx", "rfdetr-torch". See perception/catalogue.py.
+    id: str
 
 
 class DetectorHostRequest(BaseModel):
@@ -86,6 +92,49 @@ async def post_detector_host(payload: DetectorHostRequest, robot=Depends(get_rob
         "deployed": config.DETECTOR_URL,
         **robot.detections.status(),
     }
+
+
+@router.get("/api/detector-model")
+async def get_detector_model(robot=Depends(get_robot)):
+    """Which models the detection host can serve, and which is loaded.
+
+    Proxied through the robot rather than having the console call the host
+    directly: the operator already knows the robot's address, and making the
+    model buttons need a second one would put a network question in front of a
+    survey question.
+    """
+    return _models(robot) or {
+        "models": [],
+        "error": robot.detections.status().get("error") or "no detection host",
+    }
+
+
+@router.post("/api/detector-model")
+async def post_detector_model(payload: ModelRequest, robot=Depends(get_robot)):
+    """Switch the model. This is what the console's button is wired to."""
+    detector = robot.detections.backend
+    if not isinstance(detector, RemoteDetector):
+        return JSONResponse(
+            {"error": "no detection host configured — set one in Settings first"},
+            status_code=409,
+        )
+
+    answer = detector.select_model(payload.id)
+    if answer is None:
+        return JSONResponse({"error": detector.error}, status_code=502)
+    if answer.get("error"):
+        # The host refused and kept what it had. Passed straight through with
+        # its own wording, because it is the end that knows what is installed.
+        return JSONResponse(answer, status_code=409)
+
+    # The frames on the glass were judged by the model that just went away.
+    robot.detections.forget()
+    return answer
+
+
+def _models(robot):
+    detector = robot.detections.backend
+    return detector.models() if isinstance(detector, RemoteDetector) else None
 
 
 @router.get("/api/telemetry")

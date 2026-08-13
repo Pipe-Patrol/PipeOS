@@ -30,25 +30,78 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
 
-from pipepatrol.perception import RfDetrDetector  # noqa: E402
+from pipepatrol.perception import catalogue  # noqa: E402
 
 log = logging.getLogger("detect-host")
 
 DEFAULT_PORT = 8600
 
 app = FastAPI(title="PipeOS detection host")
+
+# The model currently loaded, and which catalogue entry it is. Swapped by
+# POST /api/model, which is what the console's button reaches through the robot.
 detector = None
+model_id = None
+
+
+class ModelRequest(BaseModel):
+    id: str
+
+
+def _status():
+    """Built from the backend contract -- `name`, `available`, `error` -- rather
+    than from a `status()` method, because not every backend has one and the
+    three fields are what the contract actually guarantees."""
+    return {
+        "model_id": model_id,
+        "backend": getattr(detector, "name", "unknown"),
+        "available": detector.available,
+        "ok": detector.available,
+        "error": getattr(detector, "error", None),
+        "input_size": getattr(detector, "_size", None),
+    }
 
 
 @app.get("/api/health")
 async def health():
     """What the robot and the console probe. Cheap, and truthful about the model."""
-    return {
-        "service": "pipepatrol-detect",
-        "ok": detector.available,
-        **detector.status(),
-    }
+    return {"service": "pipepatrol-detect", **_status()}
+
+
+@app.get("/api/models")
+async def models():
+    """What can be served here, and what is loaded now."""
+    return {"models": catalogue.describe(model_id, detector), **_status()}
+
+
+@app.post("/api/model")
+async def select_model(payload: ModelRequest):
+    """Load a different model. This is the button, at the end of its wire.
+
+    Loading is deferred inside the backends themselves, so this returns as soon
+    as the choice is recorded rather than blocking an operator's click on a
+    checkpoint read. If it turns out not to load, that surfaces as an
+    unavailable backend with a reason -- the same way a missing one does.
+    """
+    global detector, model_id
+
+    candidate = catalogue.build(payload.id)
+    if not candidate.available:
+        # Refused, and the old model is left running. Switching to something
+        # that is not installed must not take detection away from a survey in
+        # progress -- the operator gets told, and keeps what they had.
+        # The spread goes FIRST: _status() carries the running model's error,
+        # which is None when it is healthy, and putting it last would blank out
+        # the reason the switch was refused.
+        return JSONResponse(
+            {**_status(), "error": candidate.error, "kept": model_id}, status_code=409
+        )
+
+    detector, model_id = candidate, payload.id
+    log.info("switched to %s", model_id)
+    return {"ok": True, **_status()}
 
 
 @app.post("/api/detect")
@@ -60,7 +113,7 @@ async def detect(request: Request, min: float | None = None):
     """
     if not detector.available:
         return JSONResponse(
-            {"error": detector.error or "no model loaded", **detector.status()},
+            {**_status(), "error": detector.error or "no model loaded"},
             status_code=503,
         )
 
@@ -88,22 +141,18 @@ def main():
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument(
         "--model",
-        help="an ONNX graph to serve instead of the default (PIPEPATROL_MODEL also works)",
-    )
-    parser.add_argument(
-        "--threads",
-        type=int,
-        help="inference threads. Defaults to all cores but one -- unlike the Pi, "
-        "there is nothing else on this machine that must stay responsive.",
+        choices=[entry["id"] for entry in catalogue.CATALOGUE],
+        help="which model to start with. The console can switch it later.",
     )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    global detector
-    detector = RfDetrDetector(
-        model_path=args.model, threads=args.threads or (os.cpu_count() or 4)
-    )
+    global detector, model_id
+    if args.model:
+        model_id, detector = args.model, catalogue.build(args.model)
+    else:
+        model_id, detector = catalogue.build_default()
 
     if not detector.available:
         # Loud, and still serving. The robot's error message comes from asking
@@ -112,7 +161,7 @@ def main():
         log.error("NO MODEL: %s", detector.error)
         log.error("the robot will report this rather than a connection failure")
     else:
-        log.info("serving %s on port %d", detector.model_path.name, args.port)
+        log.info("serving %s on port %d", model_id, args.port)
         for address in _lan_addresses():
             log.info("robot should point at  %s:%d", address, args.port)
 

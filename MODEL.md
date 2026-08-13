@@ -1,5 +1,41 @@
 # The defect model
 
+## Two of them, and a button
+
+There are two trained things that can look at a frame, and the console picks
+between them in **Settings → Detection host → Model**:
+
+| id | what it is | needs |
+| -- | ---------- | ----- |
+| `rfdetr-onnx` | The exported graph. Seven classes, quick, no torch. **The one that has been down a pipe.** | `onnxruntime`, `server/model/*.onnx` |
+| `rfdetr-torch` | The same checkpoint under torch, plus an optional clean-pipe memory bank that raises `UNKNOWN` for conditions outside the seven. **Not yet QC'd.** | `rfdetr`, `torch`, `PIPEPATROL_WEIGHTS` |
+
+They are not interchangeable enough to choose automatically — which is right
+depends on what the run is for — so an operator chooses. The catalogue lives in
+`perception/catalogue.py`; the button switches the **detection host**, not the
+robot, because the robot holds no model at all.
+
+A model that is not installed is shown greyed with the reason rather than
+hidden: a checkpoint somebody forgot to copy should not look like a model that
+does not exist. Switching to one that will not load is refused and the running
+model is kept, so a survey never loses detection to a mis-click.
+
+### The anomaly bank
+
+`rfdetr-torch` can carry a PatchCore memory bank of clean-pipe patches
+(`PIPEPATROL_ANOMALY_BANK`, an `.npz`). It scores how far a frame sits from
+healthy pipe and raises a single `UNKNOWN` detection when nothing in the bank
+resembles it — and only when the classifier found nothing, since a defect that
+already has a name does not also need flagging as unnameable. It has no
+vocabulary: it says *something is wrong here*, never what. That is the point,
+because the classifier knows seven conditions and a pipe contains more.
+
+The console has no class for `UNKNOWN`, so it draws in the neutral fallback
+colour. That is correct and deliberate — an unnamed finding should not borrow a
+named one's colour.
+
+## The classifier
+
 The checkpoint is `checkpoint_best_total.pth` — an **RF-DETR** (DINOv2 ViT
 backbone, 12 layers, deformable-DETR head) trained for 20 epochs on the Roboflow
 set `Pipe-Defects-Detection-sewe-etkz`. It ships EMA weights alongside the raw

@@ -53,8 +53,8 @@ class Robot:
         )
         self.detections = DetectionService(
             self.camera,
-            # The real model when it is installed, and an honest absence when it
-            # is not. Either way the console renders detections the same way.
+            # Whichever backend is selected, and an honest absence when none
+            # is usable. Either way the console renders detections the same way.
             detector=best_detector(),
             chainage_source=lambda: self.odometry.status()["chainage_m"],
         )

@@ -1,17 +1,23 @@
-"""Defect detection: the seam a model drops into.
+"""Defect detection: the seam the models drop into.
 
-No model ships here. The one that will is not written yet and will not be
-PipePatrolML, so this file defines the shape of the hole rather than filling it.
-`NullDetector` is the backend in use today; the console renders detections,
-filters them by confidence and ages them out against this interface, so landing
-a real model is one class and a config line.
+No model ships in this file, deliberately. A backend is anything with `name`,
+`available`, `error` and `infer(jpeg, min_confidence=None) -> list[Detection]`,
+and there are three: `remote.py` posts frames to a detection host and is the
+only one the robot ever uses, while `rfdetr.py` (ONNX) and `model.py` (torch,
+plus an anomaly bank) are what that host serves. `catalogue.py` picks between
+the latter two, and an operator switches them from the console.
 
-WHY THE SERVICE EXISTS AT ALL. Inference on a Pi is slow -- seconds per frame is
-the expectation. If the video stream waited on it, driving would be unusable. So
-the two are decoupled: video runs at full rate, this samples whatever frame is
-current whenever the previous inference finished, and every detection carries
-the moment it was made. The console fades them out rather than implying they
-describe what is on screen right now.
+WHY THE SERVICE EXISTS AT ALL. If the video stream waited on inference, driving
+would be unusable -- so the two are decoupled: video runs at full rate, this
+samples whatever frame is current whenever the previous inference finished, and
+every detection carries the moment it was made. That was written when inference
+was seconds per frame on the Pi; it stays because it is the right shape, not
+because it is still a workaround.
+
+ONE FRAME AT A TIME. `active()` holds the last inference's findings and nothing
+else. `_observations` is the opposite and is kept for the whole pass, because
+the reasoning layer argues from everything a run has seen rather than from
+what is on the glass now.
 """
 
 import logging
@@ -111,6 +117,10 @@ class DetectionService:
         # accumulator: see active().
         self._detections = []
         self._detections_at = 0.0
+        # The whole pass, kept. The opposite of _detections above, and
+        # deliberately: the overlay wants the newest frame and nothing else,
+        # the reasoning layer argues from everything the run has seen.
+        self._observations = []
         self._stop = threading.Event()
         self._thread = None
         self._last_ms = None
@@ -121,6 +131,27 @@ class DetectionService:
     @property
     def available(self):
         return self._detector.available
+
+    @property
+    def backend(self):
+        """The detector itself, for callers that need more than the interface.
+
+        The model-switching endpoints use this: asking a detection host which
+        models it has is a question only the remote backend can answer, and
+        widening the detector interface with it would put it on NullDetector
+        and on the local model, where it means nothing.
+        """
+        return self._detector
+
+    def forget(self):
+        """Drop what is on the overlay, keeping the backend.
+
+        For a model switch. The boxes were judged by a model that is no longer
+        loaded, and leaving them up would attribute them to the new one.
+        """
+        with self._lock:
+            self._detections = []
+            self._detections_at = 0.0
 
     def set_backend(self, detector):
         """Swap the model behind the service while it is running.
@@ -170,6 +201,18 @@ class DetectionService:
                 self._detections = []
             return list(self._detections)
 
+    def observations(self):
+        """Every detection of the pass, for reasoning rather than the overlay."""
+        from pipepatrol.reasoning import Observation
+
+        with self._lock:
+            return [Observation.from_detection(d) for d in self._observations]
+
+    def clear_observations(self):
+        """Start a fresh pass."""
+        with self._lock:
+            self._observations = []
+
     def _run(self):
         while not self._stop.is_set():
             started = time.monotonic()
@@ -208,6 +251,7 @@ class DetectionService:
             with self._lock:
                 self._detections = found
                 self._detections_at = time.time()
+                self._observations.extend(found)
 
             self._stop.wait(max(0.0, MIN_INFERENCE_INTERVAL_S - elapsed))
 
