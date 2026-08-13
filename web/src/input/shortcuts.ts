@@ -37,20 +37,21 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: 'Esc', action: 'Close whatever is open', group: 'View' },
 
   // DualSense naming. The indices are the Gamepad API's standard mapping, which
-  // an Xbox pad shares — cross sits where A does — so an F310 works too, read
-  // positionally. The full layout is the Controller tab of this sheet.
-  //
-  // L2 and R2 are deliberately unmapped: the two controls a hand finds by
-  // accident.
-  { keys: 'Stick / D-pad ↑↓', action: 'Drive', group: 'Gamepad' },
+  // an Xbox pad shares -- cross sits where A does -- so an F310 works too, read
+  // positionally. The Controller tab of this sheet draws the layout.
+  { keys: 'L2 / R2', action: 'Drive forward · back', group: 'Gamepad' },
+  { keys: 'Left stick', action: 'Drive', group: 'Gamepad' },
+  { keys: 'Left stick press', action: 'Lock the throttle', group: 'Gamepad' },
+  { keys: 'Right stick', action: 'Pan the zoomed image', group: 'Gamepad' },
+  { keys: 'Right stick press', action: 'Show the controller map', group: 'Gamepad' },
+  { keys: 'D-pad ↑ ↓', action: 'Zoom', group: 'Gamepad' },
+  { keys: 'D-pad ← →', action: 'Light brightness', group: 'Gamepad' },
   { keys: 'Cross ✕', action: 'Take a snapshot', group: 'Gamepad' },
-  { keys: 'Circle ○', action: 'Flag what the model is surest about', group: 'Gamepad' },
-  { keys: 'Square □', action: 'Lights', group: 'Gamepad' },
+  { keys: 'Circle ○', action: 'Select · flags a detection when nothing is open', group: 'Gamepad' },
+  { keys: 'Square □', action: 'Lights on or off', group: 'Gamepad' },
   { keys: 'Triangle △', action: 'Start or stop recording', group: 'Gamepad' },
-  { keys: 'L1 / R1', action: 'Zoom out · in', group: 'Gamepad' },
-  { keys: 'D-pad ← →', action: 'Camera brightness', group: 'Gamepad' },
-  { keys: 'Create', action: 'Reset zoom and brightness', group: 'Gamepad' },
-  { keys: 'Options (hold)', action: 'Return home · held, not tapped', group: 'Gamepad' },
+  { keys: 'L1 / R1', action: 'Move through a panel · change a dropdown', group: 'Gamepad' },
+  { keys: 'Create', action: 'Reset the zoom', group: 'Gamepad' },
 
   { keys: 'D D', action: 'Demo day mode on or off', group: 'Demo day' },
   { keys: '← →', action: 'Switch footage, in demo day mode', group: 'Demo day' },

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { RefObject } from 'react'
 
 import { clampZoom } from '@/components/live/ZoomControl'
 import { useTempTestFrame } from '@/dev/useTempTestFrame'
@@ -12,6 +13,16 @@ interface VideoFeedProps {
   onZoom: (zoom: number) => void
   /** Dimmed and labelled when the link is down — a stale frame must look stale. */
   stale: boolean
+  /**
+   * Filled in with a function that nudges the pan, for the gamepad's right
+   * stick.
+   *
+   * A ref rather than a prop the parent drives, because the pan is this
+   * component's state: it is clamped against the container's own size, which
+   * the parent does not know, and lifting it out to be pushed back down would
+   * put those bounds in two places.
+   */
+  panRef?: RefObject<((dx: number, dy: number) => void) | null>
 }
 
 const RETRY_DELAY_MS = 3000
@@ -74,7 +85,7 @@ function clampOffset(offset: Offset, scale: number, width: number, height: numbe
  * other fault, and a caption in the middle of the glass would be the one
  * exception to that rule.
  */
-export function VideoFeed({ client, zoom, onZoom, stale }: VideoFeedProps) {
+export function VideoFeed({ client, zoom, onZoom, stale, panRef }: VideoFeedProps) {
   const supplied = useTempTestFrame()
   const [nonce, setNonce] = useState(() => Date.now())
   const [failed, setFailed] = useState(false)
@@ -94,6 +105,28 @@ export function VideoFeed({ client, zoom, onZoom, stale }: VideoFeedProps) {
   useEffect(() => {
     liveRef.current = { zoom, onZoom }
   })
+
+  // The right stick's way in. Clamped exactly as a drag is, so a stick pushed
+  // into a corner stops at the edge of the frame instead of sliding the picture
+  // off it.
+  useEffect(() => {
+    if (!panRef) return
+    panRef.current = (dx, dy) => {
+      const box = containerRef.current
+      if (!box) return
+      setOffset((current) =>
+        clampOffset(
+          { x: current.x - dx, y: current.y - dy },
+          liveRef.current.zoom,
+          box.clientWidth,
+          box.clientHeight,
+        ),
+      )
+    }
+    return () => {
+      panRef.current = null
+    }
+  }, [panRef])
 
   // Retry forever: the camera can come back without a page reload, and an
   // operator should not have to know that.

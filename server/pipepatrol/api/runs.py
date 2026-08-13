@@ -89,6 +89,23 @@ async def get_run(run_id: str, robot=Depends(get_robot)):
     return run.as_dict()
 
 
+@router.delete("/recordings")
+async def delete_all_recordings(robot=Depends(get_robot)):
+    """Every clip of every run, in one press.
+
+    Declared ABOVE the /{run_id} routes deliberately: FastAPI matches in
+    declaration order, and below them this path would be swallowed as a run
+    whose id is the literal string "recordings".
+    """
+    if robot.recorder.status().get("active"):
+        return JSONResponse(
+            {"error": "stop recording before deleting all video"}, status_code=409
+        )
+
+    runs, clips, freed = robot.store.delete_all_recordings()
+    return {"ok": True, "runs": runs, "deleted": clips, "freed_bytes": freed}
+
+
 @router.delete("/{run_id}")
 async def delete_run(run_id: str, robot=Depends(get_robot)):
     if run_id == robot.active_run_id:

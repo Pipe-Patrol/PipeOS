@@ -1,145 +1,151 @@
-import { Circle, Square, Triangle, X } from '@phosphor-icons/react'
-import type { ReactNode } from 'react'
-
 import { useGamepad } from '@/input/useGamepad'
 
 /**
- * What every control on the pad does, drawn where it sits on the pad.
+ * The pad, drawn, with one label per control.
  *
- * A LAYOUT, NOT A TABLE. The shortcut list already says all of this in two
- * columns, and two columns is the wrong shape for a thing you are holding: an
- * operator looking this up is trying to answer "which of these under my thumb
- * is record", and a list makes them translate a name into a position. Here the
- * left column is the pad's left half and the right column is its right half,
- * in the order the controls physically run down it.
+ * A PICTURE RATHER THAN A LIST, because the question this answers is "which of
+ * these under my thumb does the thing", and a list makes an operator translate
+ * a name into a position first. Labels only — no descriptions. Anything that
+ * needs a sentence is in the keyboard tab.
  *
- * PLAYSTATION NAMING. The DualSense is the pad in the case, so cross, circle,
- * square and triangle are what is printed on the buttons and what is printed
- * here. The button INDICES are identical either way — the Gamepad API's
- * standard mapping puts cross where an Xbox pad puts A — so nothing in
- * useDriveInput cares which brand is plugged in, and an F310 still works with
- * the letters read off this diagram positionally.
+ * The outline is hand-drawn SVG rather than an icon-set glyph, which is the one
+ * place in this console that is the right call: no icon set ships a labelled
+ * controller diagram, and the alternative is a picture of a pad with no labels
+ * on it, which is a decoration.
  *
- * The four face glyphs are Phosphor shapes rather than drawings, so they sit on
- * the same weight curve as the rest of the icon set.
+ * The pad occupies 0..400 x 0..260; the viewBox is wider than that so the
+ * labels have gutters either side to sit in. Leader lines are written in the
+ * same coordinates as the shapes they point at.
  */
 
-interface Control {
-  /** What is printed on the pad. */
-  name: string
-  glyph?: ReactNode
-  action: string
-  /** Said under the action when the control behaves unusually. */
-  note?: string
-}
-
-const FACE: Control[] = [
-  { name: 'Cross', glyph: <X size={13} weight="bold" />, action: 'Snapshot' },
-  {
-    name: 'Circle',
-    glyph: <Circle size={13} weight="bold" />,
-    action: 'Flag detection',
-    note: 'Files whatever the model is surest about',
-  },
-  { name: 'Square', glyph: <Square size={13} weight="bold" />, action: 'Lights' },
-  {
-    name: 'Triangle',
-    glyph: <Triangle size={13} weight="bold" />,
-    action: 'Record',
-    note: 'Starts, or stops',
-  },
-]
-
-const RIGHT: Control[] = [
-  { name: 'L1 · R1', action: 'Zoom out · in' },
-  { name: 'Options', action: 'Return home', note: 'HOLD for a second — not a tap' },
-]
-
-const LEFT: Control[] = [
-  { name: 'Left stick', action: 'Drive', note: 'Proportional. Forward is up' },
-  { name: 'D-pad ↑ ↓', action: 'Drive', note: 'Full speed, no easing' },
-  { name: 'D-pad ← →', action: 'Camera brightness' },
-  { name: 'Create', action: 'Reset zoom and brightness' },
-]
+/** Face buttons: [cx, cy, glyph, label]. */
+const FACE = [
+  { cx: 300, cy: 78, glyph: '△', label: 'Record' },
+  { cx: 324, cy: 102, glyph: '○', label: 'Select' },
+  { cx: 276, cy: 102, glyph: '□', label: 'Lights' },
+  { cx: 300, cy: 126, glyph: '✕', label: 'Snapshot' },
+] as const
 
 export function GamepadGuide() {
   const gamepad = useGamepad()
 
   return (
     <div>
-      <div className="mb-3 flex items-baseline justify-between gap-4">
-        <p className="text-[12px] text-ink-400">
-          Everything the driving screen does, without a keyboard.
-        </p>
-        <ConnectionChip connected={gamepad.connected} id={gamepad.id} />
+      <div className="mb-2 flex items-baseline justify-between gap-4">
+        <p className="text-[12px] text-ink-400">Every control, labelled.</p>
+        <span
+          className={`shrink-0 text-[11.5px] ${
+            gamepad.connected ? 'text-state-recording-signal' : 'text-ink-500'
+          }`}
+          title={gamepad.id ?? undefined}
+        >
+          {gamepad.connected ? 'Connected' : 'Press any button to connect'}
+        </span>
       </div>
 
-      <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
-        <Group title="Left hand" controls={LEFT} />
-        <div>
-          <Group title="Right hand" controls={FACE} />
-          <div className="mt-1">
-            <Group title={null} controls={RIGHT} />
-          </div>
-        </div>
-      </div>
+      <svg
+        // The box is wider than the pad on purpose: the labels live in gutters
+        // either side, and sizing it to the drawing alone clipped every one of
+        // them at the edge.
+        viewBox="-48 0 484 262"
+        className="w-full"
+        role="img"
+        aria-label="Controller layout with each button labelled"
+      >
+        <g
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.4}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="text-ink-600"
+        >
+          {/* Body: two grips under a slab. One path so the silhouette reads as
+              a controller at a glance rather than as assorted rectangles. */}
+          <path d="M120 62 H280 Q322 62 336 96 L366 186 Q376 220 348 232 Q322 242 304 216 L280 178 H120 L96 216 Q78 242 52 232 Q24 220 34 186 L64 96 Q78 62 120 62 Z" />
 
-      <p className="mt-4 border-t border-ink-800 pt-3 text-[11.5px] text-ink-500">
-        L2 and R2 do nothing on purpose — they are the two controls a hand finds
-        by accident, and nothing here is worth firing that way.
-      </p>
+          {/* D-pad */}
+          <path d="M92 90 h16 v16 h16 v16 h-16 v16 h-16 v-16 h-16 v-16 h16 z" />
+
+          {/* Sticks */}
+          <circle cx="150" cy="168" r="20" />
+          <circle cx="250" cy="168" r="20" />
+
+          {/* Face buttons */}
+          {FACE.map((button) => (
+            <circle key={button.label} cx={button.cx} cy={button.cy} r="13" />
+          ))}
+
+          {/* Shoulders and triggers */}
+          <path d="M78 46 q22 -14 46 -8" />
+          <path d="M322 46 q-22 -14 -46 -8" />
+          <path d="M84 28 q22 -14 46 -8" />
+          <path d="M316 28 q-22 -14 -46 -8" />
+
+          {/* Create. Options is drawn but unlabelled -- it is deliberately
+              unbound, and labelling it would imply an action that is not there. */}
+          <path d="M168 84 v14" />
+          <path d="M232 84 v14" />
+        </g>
+
+        {/* Glyphs sit inside their circles, at the size they are printed. */}
+        <g className="fill-ink-300" fontSize="13" textAnchor="middle">
+          {FACE.map((button) => (
+            <text key={button.label} x={button.cx} y={button.cy + 4.5}>
+              {button.glyph}
+            </text>
+          ))}
+        </g>
+
+        {/* Leader lines, then labels. Drawn as one group so the hairlines stay
+            visibly quieter than the text they point from. */}
+        <g stroke="currentColor" strokeWidth={1} className="text-ink-800">
+          <path d="M100 20 v-6 h-58" />
+          <path d="M300 20 v-6 h58" />
+          <path d="M108 42 h-66" />
+          <path d="M292 42 h66" />
+          <path d="M108 114 h-66" />
+          <path d="M150 190 v22 h-40" />
+          <path d="M250 190 v22 h40" />
+          <path d="M168 84 v-18 h-42" />
+          <path d="M337 102 h30" />
+        </g>
+
+        <g className="fill-ink-100" fontSize="11.5">
+          <text x="38" y="17" textAnchor="end">L2 · Forward</text>
+          <text x="362" y="17">R2 · Back</text>
+          <text x="38" y="45" textAnchor="end">L1 · Previous</text>
+          <text x="362" y="45">R1 · Next</text>
+
+          {/* Three short lines rather than one long one: end-anchored text
+              this far left runs out of gutter before it runs out of words. */}
+          <text x="38" y="110" textAnchor="end">D-pad</text>
+          <text x="38" y="124" textAnchor="end" className="fill-ink-500">
+            ↑↓ Zoom
+          </text>
+          <text x="38" y="138" textAnchor="end" className="fill-ink-500">
+            ←→ Light
+          </text>
+
+          <text x="106" y="216" textAnchor="end">Left stick · Drive</text>
+          <text x="106" y="230" textAnchor="end" className="fill-ink-500">
+            Press · Lock throttle
+          </text>
+
+          <text x="294" y="216">Right stick · Pan</text>
+          <text x="294" y="230" className="fill-ink-500">
+            Press · This map
+          </text>
+
+          <text x="122" y="69" textAnchor="end">Create · Reset</text>
+
+          {FACE.map((button, index) => (
+            <text key={button.label} x={371} y={80 + index * 15}>
+              {button.glyph} {button.label}
+            </text>
+          ))}
+        </g>
+      </svg>
     </div>
-  )
-}
-
-function Group({ title, controls }: { title: string | null; controls: Control[] }) {
-  return (
-    <section>
-      {title && <div className="label mb-1.5">{title}</div>}
-      <ul>
-        {controls.map((control) => (
-          <li
-            key={control.name}
-            className="flex items-baseline gap-3 border-b border-ink-800/60 py-1.5 last:border-0"
-          >
-            <span className="flex w-[92px] shrink-0 items-center gap-1.5 text-[12px] text-ink-100">
-              {control.glyph}
-              {control.name}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[12.5px] text-ink-0">{control.action}</span>
-              {control.note && (
-                <span className="block text-[11px] text-ink-500">{control.note}</span>
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
-/**
- * Whether a pad is actually connected, and which.
- *
- * Here rather than left to the operator to work out, because a browser will not
- * report a gamepad until one of its buttons has been pressed — so "nothing
- * happens when I press circle" has two causes, and this separates them.
- */
-function ConnectionChip({ connected, id }: { connected: boolean; id: string | null }) {
-  if (!connected) {
-    return (
-      <span className="shrink-0 text-[11.5px] text-ink-500">
-        Press any button to connect
-      </span>
-    )
-  }
-  return (
-    <span
-      className="shrink-0 truncate text-[11.5px] text-state-recording-signal"
-      title={id ?? undefined}
-    >
-      Connected
-    </span>
   )
 }

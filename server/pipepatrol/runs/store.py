@@ -174,6 +174,24 @@ class RunStore:
             log.info("recording deleted: %s/%s (%d bytes)", run_id, recording_id, freed)
             return True, freed
 
+    def delete_all_recordings(self):
+        """Every clip of every run. Returns (runs_touched, clips, freed_bytes).
+
+        The bulk version of the per-run button, for the case it exists to serve:
+        a card that is full now, where going run by run is a dozen confirmations
+        deep. Every run keeps its defects, stills and path -- this only ever
+        removes video.
+        """
+        runs = clips = freed = 0
+        for summary in self.list():
+            count, bytes_freed = self.delete_recordings(summary["id"])
+            if count:
+                runs += 1
+                clips += count
+                freed += bytes_freed
+        log.info("all video deleted: %d clips across %d runs (%d bytes)", clips, runs, freed)
+        return runs, clips, freed
+
     def delete_recordings(self, run_id):
         """Every clip in the run. Returns (count, freed_bytes)."""
         with self._lock:

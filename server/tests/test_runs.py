@@ -292,3 +292,18 @@ class TestDeletingVideo:
 
         assert deleted is True
         assert store.get(run.id).recordings == []
+
+    def test_all_video_everywhere_goes_in_one_press(self, store):
+        """The bulk button. Every run keeps everything except its footage."""
+        first, _ = self._recorded(store, count=2)
+        second, _ = self._recorded(store, count=1)
+        store.create(name="never recorded")
+
+        runs, clips, freed = store.delete_all_recordings()
+
+        assert (runs, clips) == (2, 3)
+        assert freed == 3030
+        assert store.get(first.id).recordings == []
+        assert store.get(second.id).recordings == []
+        # Three runs still exist. Only video went.
+        assert len(store.list()) == 3

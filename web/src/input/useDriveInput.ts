@@ -32,6 +32,8 @@ export type DriveSource = 'keyboard' | 'gamepad' | null
 
 export interface DriveInput {
   throttle: number
+  /** Right stick, -1..1 each. The caller decides what it pans. */
+  pan: { x: number; y: number }
   direction: DriveDirection
   source: DriveSource
   gamepadConnected: boolean
@@ -45,6 +47,8 @@ export interface DriveInput {
    */
   lockHint: boolean
 }
+
+const ZERO_PAN = { x: 0, y: 0 }
 
 const KEY_FORWARD = new Set(['KeyW', 'ArrowUp'])
 const KEY_REVERSE = new Set(['KeyS', 'ArrowDown'])
@@ -98,19 +102,22 @@ function rememberLockLearned(): void {
  */
 export interface GamepadActions {
   onSnapshot?: () => void
-  onFlag?: () => void
+  /** Circle. Flags a detection, or activates the focused control in a panel. */
+  onConfirm?: () => void
   onToggleLights?: () => void
   onToggleRecording?: () => void
   onZoomIn?: () => void
   onZoomOut?: () => void
-  onBrighter?: () => void
-  onDarker?: () => void
+  /** D-pad left/right. The LED ring, not the camera. */
+  onLightsBrighter?: () => void
+  onLightsDarker?: () => void
   onResetView?: () => void
-  onReturnHome?: () => void
+  /** L1/R1. Moves focus through whatever panel is open. */
+  onFocusPrevious?: () => void
+  onFocusNext?: () => void
+  /** R3. The controller map. */
+  onShowGuide?: () => void
 }
-
-/** How long Start must be held before a return engages. */
-const RETURN_HOLD_MS = 1000
 
 export interface DriveInputOptions {
   client: RobotClient | null
@@ -234,54 +241,69 @@ export function useDriveInput({
 
     for (const button of gamepad.pressed) {
       switch (button) {
-        case GAMEPAD_BUTTONS.A:
+        case GAMEPAD_BUTTONS.CROSS:
           onSnapshotRef.current?.()
           break
-        case GAMEPAD_BUTTONS.B:
-          pad.onFlag?.()
+        case GAMEPAD_BUTTONS.CIRCLE:
+          pad.onConfirm?.()
           break
-        case GAMEPAD_BUTTONS.X:
+        case GAMEPAD_BUTTONS.SQUARE:
           pad.onToggleLights?.()
           break
-        case GAMEPAD_BUTTONS.Y:
+        case GAMEPAD_BUTTONS.TRIANGLE:
           pad.onToggleRecording?.()
           break
-        case GAMEPAD_BUTTONS.RB:
+        case GAMEPAD_BUTTONS.DPAD_UP:
           pad.onZoomIn?.()
           break
-        case GAMEPAD_BUTTONS.LB:
+        case GAMEPAD_BUTTONS.DPAD_DOWN:
           pad.onZoomOut?.()
           break
         case GAMEPAD_BUTTONS.DPAD_RIGHT:
-          pad.onBrighter?.()
+          pad.onLightsBrighter?.()
           break
         case GAMEPAD_BUTTONS.DPAD_LEFT:
-          pad.onDarker?.()
+          pad.onLightsDarker?.()
           break
-        case GAMEPAD_BUTTONS.BACK:
+        case GAMEPAD_BUTTONS.R1:
+          pad.onFocusNext?.()
+          break
+        case GAMEPAD_BUTTONS.L1:
+          pad.onFocusPrevious?.()
+          break
+        case GAMEPAD_BUTTONS.CREATE:
           pad.onResetView?.()
           break
+        case GAMEPAD_BUTTONS.R3:
+          pad.onShowGuide?.()
+          break
+        // L3 latches the throttle. Handled with the keyboard lock below rather
+        // than here, because it is the same latch and must not become a second
+        // one that can disagree with it.
         default:
           break
       }
     }
   }, [enabled, gamepad.pressed])
 
-  // Start engages a return home, and is HELD rather than tapped.
-  //
-  // It is the only control on the pad that drives the robot somewhere on its
-  // own, so it is the one that must not fire from a thumb catching a button
-  // while reaching for the stick. Everything else here is recoverable by
-  // pressing it again; this is not.
-  const returnHeld = enabled && gamepad.held.includes(GAMEPAD_BUTTONS.START)
+  // L3 is the pad's Shift: it latches whatever is moving now, and releases on
+  // the next press. Kept in the same state as the keyboard latch so a throttle
+  // locked with the stick is released by Escape, by a drive key, and by every
+  // safety release below -- exactly as one locked with Shift is.
+  const stickPressed = gamepad.pressed.includes(GAMEPAD_BUTTONS.L3)
   useEffect(() => {
-    if (!returnHeld) return
-    const timer = window.setTimeout(
-      () => actionsRef.current?.onReturnHome?.(),
-      RETURN_HOLD_MS,
-    )
-    return () => window.clearTimeout(timer)
-  }, [returnHeld])
+    if (!enabled || !stickPressed) return
+    setLocked((current) => {
+      const next = current ? null : directionRef.current
+      if (next) {
+        rememberLockLearned()
+        setLearned(true)
+      }
+      return next
+    })
+  }, [enabled, stickPressed])
+
+
 
   // --- hint ---
 
@@ -334,6 +356,9 @@ export function useDriveInput({
 
   return {
     throttle,
+    // Zeroed with everything else when the screen is not driveable, so a stick
+    // resting off centre cannot pan a frame nobody is meant to be steering.
+    pan: enabled ? gamepad.pan : ZERO_PAN,
     direction,
     source,
     gamepadConnected: gamepad.connected,
