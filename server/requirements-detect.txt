@@ -1,11 +1,11 @@
 # Serving the defect model, on a laptop. NOT installed on the robot.
 #
 # The robot does no inference: it posts frames to whatever machine is running
-# server/detect-host.py, which is what these are for. Install them on top of
-# requirements.txt.
+# server/detect-host.py, which is what these are for. This file pulls in
+# requirements.txt itself, so it is the only one a laptop needs.
 #
 #   cd server
-#   .venv/bin/pip install -r requirements.txt -r requirements-detect.txt
+#   .venv/bin/pip install -r requirements-detect.txt
 #   .venv/bin/python detect-host.py
 #
 # Torch is deliberately NOT here either. It is needed to produce the ONNX graph,

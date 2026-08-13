@@ -213,7 +213,9 @@ if [ ! -d .venv ]; then
   python3 -m venv --system-site-packages .venv
 fi
 .venv/bin/pip install --quiet --upgrade pip
-.venv/bin/pip install --quiet -r requirements.txt
+# requirements-pi.txt pulls in requirements.txt, and adds the GPIO and IMU
+# drivers that only build on a Pi. A laptop installs requirements.txt alone.
+.venv/bin/pip install --quiet -r requirements-pi.txt
 
 # --- get the model off this Pi, and keep it off ---
 #

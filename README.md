@@ -71,7 +71,7 @@ Then, on your computer, install what serves it and start it:
 
 ```bash
 cd server
-.venv/bin/pip install -r requirements.txt -r requirements-detect.txt
+.venv/bin/pip install -r requirements-detect.txt
 .venv/bin/python detect-host.py
 ```
 
@@ -175,7 +175,7 @@ anyway, so this is the same graph the robot would be getting answers from:
 ```bash
 cd server
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt -r requirements-detect.txt
+.venv/bin/pip install -r requirements-detect.txt
 .venv/bin/python -m pipepatrol        # http://localhost:8000
 ```
 

@@ -117,7 +117,7 @@ That writes `server/model/pipe-defects.onnx`, which stays on your machine. The
 
 ```bash
 cd server
-.venv/bin/pip install -r requirements.txt -r requirements-detect.txt
+.venv/bin/pip install -r requirements-detect.txt
 ```
 
 **3. Run the detection host.**
