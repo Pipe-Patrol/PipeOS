@@ -18,6 +18,10 @@ import { defineConfig } from 'vitest/config'
 // PIPEPATROL_SERVER to point the dev console at a robot on the network instead.
 const DEV_SERVER = process.env.PIPEPATROL_SERVER ?? 'http://127.0.0.1:8000'
 
+// Where the model is served from on a laptop. detect-host.py, not the full
+// server -- see MODEL.md. Overridden with PIPEPATROL_DETECT_HOST.
+const DETECT_HOST = process.env.PIPEPATROL_DETECT_HOST ?? 'http://127.0.0.1:8600'
+
 const temptestSim = fileURLToPath(new URL('../temptest/sim.ts', import.meta.url))
 const modelLab = fileURLToPath(new URL('../temptest/model-lab.html', import.meta.url))
 const sampleFrame = fileURLToPath(new URL('../temptest/sample-pipe.jpg', import.meta.url))
@@ -131,6 +135,19 @@ export default defineConfig({
      * the server as well.
      */
     proxy: {
+      /**
+       * The model first, and only in development.
+       *
+       * Demo day in test mode sends each frame to /api/detect and draws what
+       * comes back. That used to reach the full server on 8000, which on a
+       * laptop with no robot attached is usually not running at all -- so the
+       * panel played footage and the console drew no boxes over it, which is
+       * the one thing demo day exists to show. detect-host.py on 8600 speaks
+       * the same endpoint and is the thing a laptop actually runs.
+       *
+       * Listed before /api because Vite takes the first key that matches.
+       */
+      '/api/detect': { target: DETECT_HOST, changeOrigin: true },
       '/api': { target: DEV_SERVER, changeOrigin: true },
       '/ws': { target: DEV_SERVER, ws: true, changeOrigin: true },
       '/demo-panel': { target: DEV_SERVER, changeOrigin: true },
