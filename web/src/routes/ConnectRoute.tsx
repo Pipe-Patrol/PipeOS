@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/primitives/Button'
-import { TEST_MODE_AVAILABLE, activateTestMode, wantsTestMode } from '@/dev/tempTest'
 import { RobotIcon } from '@/components/primitives/icons'
 import { normaliseBaseUrl } from '@/robot/client'
 import { useRobot } from '@/robot/RobotProvider'
@@ -28,13 +27,6 @@ export function ConnectRoute() {
   const [address, setAddress] = useState(() => defaultAddress())
   const [status, setStatus] = useState<ProbeStatus>('idle')
   const [health, setHealth] = useState<Health | null>(null)
-  const [testError, setTestError] = useState<string | null>(null)
-
-  // `test` in both fields asks for the in-browser robot. Read here rather than
-  // inside submit so the status line can say so before Continue is pressed --
-  // otherwise the screen spends the whole time reporting an address it cannot
-  // reach, which is true of `test` and unhelpful.
-  const testMode = wantsTestMode(name, address)
 
   const check = useCallback(async (value: string) => {
     const addr = value.trim()
@@ -60,31 +52,15 @@ export function ConnectRoute() {
   // Probe whatever is in the address field, debounced, so the status line
   // reflects what the operator sees before they commit. Also covers mount.
   useEffect(() => {
-    if (testMode || !address.trim()) return
+    if (!address.trim()) return
     const timer = setTimeout(() => void check(address), 250)
     return () => clearTimeout(timer)
-  }, [testMode, address, check])
+  }, [address, check])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     const addr = address.trim()
     if (!addr) return
-
-    // The simulator answers on this origin once it is up, so from here on it is
-    // an ordinary connection -- and deliberately not saved as a device, because
-    // a robot called `test` in the picker outlives the session that made it.
-    if (testMode) {
-      setTestError(null)
-      try {
-        await activateTestMode()
-        await connect('')
-        navigate('/live')
-      } catch (caught) {
-        setTestError(caught instanceof Error ? caught.message : 'test mode failed to start')
-      }
-      return
-    }
-
     saveDevice(addr, name)
     try {
       await connect(addr)
@@ -98,7 +74,7 @@ export function ConnectRoute() {
     <main className="mx-auto flex min-h-full w-[min(460px,92vw)] flex-col justify-center gap-6 py-12">
       <div className="flex flex-col gap-1">
         <h1 className="display text-[22px]">Welcome to PipeOS</h1>
-        <p className="text-[12px] text-ink-500">{subtext(status, address, testMode)}</p>
+        <p className="text-[12px] text-ink-500">{subtext(status, address)}</p>
       </div>
 
       <form onSubmit={submit} className="panel flex flex-col gap-4 rounded-lg p-4">
@@ -106,16 +82,10 @@ export function ConnectRoute() {
           <RobotIcon
             size={22}
             className={
-              status === 'ok' || testMode ? 'text-state-recording-signal' : 'text-ink-500'
+              status === 'ok' ? 'text-state-recording-signal' : 'text-ink-500'
             }
           />
-          {testMode ? (
-            <span className="text-[12px] text-ink-100">
-              Test mode<span className="text-ink-500"> — simulated robot, no hardware</span>
-            </span>
-          ) : (
-            <StatusLine status={status} health={health} address={address} />
-          )}
+          <StatusLine status={status} health={health} address={address} />
         </div>
 
         <label className="flex flex-col gap-1">
@@ -144,9 +114,7 @@ export function ConnectRoute() {
         </Button>
       </form>
 
-      {(testError ?? error) && (
-        <p className="text-[12px] text-state-fault-signal">{testError ?? error}</p>
-      )}
+      {error && <p className="text-[12px] text-state-fault-signal">{error}</p>}
 
       {client && (
         <button
@@ -193,13 +161,8 @@ function StatusLine({
   )
 }
 
-function subtext(status: ProbeStatus, address: string, testMode: boolean): string {
-  if (testMode) return 'Continue starts the simulated robot.'
-  if (!address.trim()) {
-    return TEST_MODE_AVAILABLE
-      ? 'Enter your robot’s address — or type test in both fields for a simulated one.'
-      : 'Enter your robot’s address to continue.'
-  }
+function subtext(status: ProbeStatus, address: string): string {
+  if (!address.trim()) return 'Enter your robot’s address to continue.'
   if (status === 'fail') return 'Can’t reach that address. Check it and try again.'
   return 'Confirm your robot, then continue.'
 }

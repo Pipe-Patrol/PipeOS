@@ -18,19 +18,9 @@ import { defineConfig } from 'vitest/config'
 // PIPEPATROL_SERVER to point the dev console at a robot on the network instead.
 const DEV_SERVER = process.env.PIPEPATROL_SERVER ?? 'http://127.0.0.1:8000'
 
-// Where the model is served from on a laptop. detect-host.py, not the full
-// server -- see MODEL.md. Overridden with PIPEPATROL_DETECT_HOST.
-const DETECT_HOST = process.env.PIPEPATROL_DETECT_HOST ?? 'http://127.0.0.1:8600'
-
 const temptestSim = fileURLToPath(new URL('../temptest/sim.ts', import.meta.url))
 const modelLab = fileURLToPath(new URL('../temptest/model-lab.html', import.meta.url))
 const sampleFrame = fileURLToPath(new URL('../temptest/sample-pipe.jpg', import.meta.url))
-const demoPanel = fileURLToPath(new URL('../demoday/panel.html', import.meta.url))
-
-/** A filesystem path as Vite's /@fs prefix wants it, on any OS. */
-function fsUrl(path: string): string {
-  return `/@fs/${path.replace(/\\/g, '/').replace(/^\/+/, '')}`
-}
 
 /**
  * The simulator shims fetch and WebSocket, but images are <img> loads the fetch
@@ -69,24 +59,6 @@ function simMediaPlugin(): Plugin {
         }
       })
 
-      // The demo day panel: /demo-panel, straight out of demoday/. It is
-      // proxied to the local server below as well, but the proxy only answers
-      // when somebody is running one -- and in test mode nobody is, which is
-      // the whole point of test mode. The panel talks to the simulator over a
-      // BroadcastChannel, not over the server, so serving the file is all it
-      // needs. A real robot is a different origin and is untouched.
-      server.middlewares.use(async (req, res, next) => {
-        if (!req.url || req.url.split('?')[0] !== '/demo-panel') return next()
-        try {
-          const page = await readFile(demoPanel)
-          res.setHeader('Content-Type', 'text/html; charset=utf-8')
-          res.setHeader('Cache-Control', 'no-store')
-          res.end(page)
-        } catch {
-          next()
-        }
-      })
-
       server.middlewares.use(async (req, res, next) => {
         if (!req.url || !wantsFrame(req.url)) return next()
         try {
@@ -109,13 +81,7 @@ export default defineConfig({
   },
   // Injected into the dev-only loader. In production this is dead code the build
   // strips, so the simulator never reaches the Pi.
-  //
-  // Built with a URL, not string concatenation. `/@fs` wants a POSIX path with
-  // one leading slash; fileURLToPath gives `C:\Users\...` on Windows, and
-  // pasting that on the end produced `/@fsC:\Users\...`, which 404s. The
-  // console then reported the folder as missing on a checkout that had it,
-  // which is a long way from the truth.
-  define: { __TEMPTEST_URL__: JSON.stringify(fsUrl(temptestSim)) },
+  define: { __TEMPTEST_URL__: JSON.stringify(`/@fs${temptestSim}`) },
   server: {
     // Let the dev server serve ../temptest, which sits outside web/.
     fs: { allow: ['..'] },
@@ -135,19 +101,6 @@ export default defineConfig({
      * the server as well.
      */
     proxy: {
-      /**
-       * The model first, and only in development.
-       *
-       * Demo day in test mode sends each frame to /api/detect and draws what
-       * comes back. That used to reach the full server on 8000, which on a
-       * laptop with no robot attached is usually not running at all -- so the
-       * panel played footage and the console drew no boxes over it, which is
-       * the one thing demo day exists to show. detect-host.py on 8600 speaks
-       * the same endpoint and is the thing a laptop actually runs.
-       *
-       * Listed before /api because Vite takes the first key that matches.
-       */
-      '/api/detect': { target: DETECT_HOST, changeOrigin: true },
       '/api': { target: DEV_SERVER, changeOrigin: true },
       '/ws': { target: DEV_SERVER, ws: true, changeOrigin: true },
       '/demo-panel': { target: DEV_SERVER, changeOrigin: true },

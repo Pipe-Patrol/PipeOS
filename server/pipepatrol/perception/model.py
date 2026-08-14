@@ -63,45 +63,13 @@ CONF_THRESHOLD = float(os.environ.get("PIPEPATROL_CONF_THRESHOLD", "0.30"))
 ANOMALY_CROP = float(os.environ.get("PIPEPATROL_ANOMALY_CROP", "0.9"))
 
 
-# What a checkpoint calls a class, in the console's words. Training data is
-# labelled by whoever made it, and "cracks" and "crack" are the same defect to
-# everyone except a string comparison -- and that comparison is what decides the
-# box colour, the mute and the auto-flag rules. See detection-classes.ts.
-ALIASES = {"cracks": "crack", "roots": "root intrusion", "deposits": "deposition"}
-
-
-def _labels_from(names):
-    """The id-to-label map a checkpoint's own class list implies.
-
-    Index 0 is the dataset's superclass -- every export from Roboflow carries
-    one -- and the trained classes start at 1, which is what the model emits.
-    Nothing is dropped for being unrecognised: an unknown class still draws, in
-    the console's fallback grey, which is a truer report than silence.
-    """
-    if not names:
-        return LABELS
-    mapped = {}
-    for index, name in enumerate(names):
-        if index == 0:
-            continue
-        clean = str(name).strip().lower()
-        mapped[index] = ALIASES.get(clean, clean)
-    return mapped or LABELS
-
-
 def _normalise(x1, y1, x2, y2, width, height):
-    """Pixel box to the 0..1 xyxy the console expects.
-
-    float() around each one, not decoration: torch hands back numpy scalars,
-    which round() preserves, and FastAPI cannot encode a numpy.float32 -- the
-    whole response fails with a TypeError about iteration, a long way from the
-    box that caused it.
-    """
+    """Pixel box to the 0..1 xyxy the console expects."""
     return [
-        round(float(max(0.0, min(1.0, x1 / width))), 4),
-        round(float(max(0.0, min(1.0, y1 / height))), 4),
-        round(float(max(0.0, min(1.0, x2 / width))), 4),
-        round(float(max(0.0, min(1.0, y2 / height))), 4),
+        round(max(0.0, min(1.0, x1 / width)), 4),
+        round(max(0.0, min(1.0, y1 / height)), 4),
+        round(max(0.0, min(1.0, x2 / width)), 4),
+        round(max(0.0, min(1.0, y2 / height)), 4),
     ]
 
 
@@ -123,9 +91,6 @@ class RFDetrDetector:
         self._weights = weights or os.environ.get("PIPEPATROL_WEIGHTS")
         self._model = None
         self._anomaly = AnomalyBank(anomaly_bank) if anomaly_bank else None
-        # Filled in at load time from the checkpoint's own class list, falling
-        # back to LABELS for checkpoints that carry none.
-        self._labels = LABELS
         self._failed = False
         # Part of the backend contract, alongside `name` and `available`. The
         # console shows it, the catalogue reads it, and a backend without one
@@ -141,33 +106,10 @@ class RFDetrDetector:
 
     def _load(self):
         from PIL import Image  # noqa: F401 - checked here so infer can assume it
-        import rfdetr
-        import torch
+        from rfdetr import RFDETRLarge
 
-        # ARCHITECTURE COMES FROM THE CHECKPOINT, NOT FROM HERE.
-        #
-        # This used to name RFDETRLarge outright. A small checkpoint loaded into
-        # the large architecture does not fail -- rfdetr fills the layers it
-        # cannot find with random weights, logs a warning, and infers. What comes
-        # back is a model that is part trained and part noise: every box arrives
-        # under a tenth of the confidence it should, so the console draws almost
-        # nothing and the checkpoint looks badly trained rather than badly
-        # loaded. Training writes the variant it used into the file; read it.
-        checkpoint = torch.load(self._weights, map_location="cpu", weights_only=False)
-        variant = checkpoint.get("model_name") if isinstance(checkpoint, dict) else None
-        factory = getattr(rfdetr, variant, None) if variant else None
-        if factory is None:
-            log.warning("checkpoint names no architecture; assuming large")
-            factory = rfdetr.RFDETRLarge
-
-        names = (checkpoint.get("args") or {}).get("class_names") if isinstance(checkpoint, dict) else None
-        self._labels = _labels_from(names)
-
-        log.info("loading %s from %s", getattr(factory, "__name__", "?"), self._weights)
-        self._model = factory(
-            pretrain_weights=self._weights,
-            **({"num_classes": len(names)} if names else {}),
-        )
+        log.info("loading detector from %s", self._weights)
+        self._model = RFDETRLarge(pretrain_weights=self._weights)
 
     def infer(self, jpeg, min_confidence=None):
         """`min_confidence` overrides the floor, and the signature has to carry it.
@@ -202,7 +144,7 @@ class RFDetrDetector:
         for box, confidence, class_id in zip(
             result.xyxy, result.confidence, result.class_id
         ):
-            label = self._labels.get(int(class_id))
+            label = LABELS.get(int(class_id))
             if label is None:
                 continue
             x1, y1, x2, y2 = box
