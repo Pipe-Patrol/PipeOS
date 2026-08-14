@@ -1,6 +1,7 @@
 """Defect detection: the interface, and the models that fill it."""
 
 from pipepatrol import config
+from pipepatrol.perception import discover, remote
 from pipepatrol.perception.detector import Detection, DetectionService, NullDetector
 from pipepatrol.perception.remote import RemoteDetector
 from pipepatrol.perception.rfdetr import RfDetrDetector
@@ -14,6 +15,18 @@ __all__ = [
     "best_detector",
     "detector_for",
 ]
+
+def rediscover_detector():
+    """A backend for a model found elsewhere on the robot's network, or None.
+
+    Handed to DetectionService so a robot whose configured host has gone
+    unreachable can find the laptop that actually has the model. None means
+    "nothing better out there" and leaves the current backend alone, errors and
+    all -- an unreachable host the operator configured is still information.
+    """
+    url = discover.find_detector()
+    return detector_for(url) if url else None
+
 
 NO_HOST = (
     "no detection host configured — set one in Settings, and run "
@@ -46,6 +59,19 @@ def best_detector():
     just no longer on the robot.
     """
     url = config.detector_url()
+
+    # Nothing configured, or what is configured is not answering: look for a
+    # machine on the robot's own network that is serving the model. This is what
+    # makes detection work after joining the hotspot without anyone redeploying
+    # or typing an address -- see perception/discover.py for why an address
+    # baked in at deploy time is wrong so often.
+    #
+    # A configured address that IS answering is never second-guessed.
+    if not url or not discover._serves_model(remote.normalise_url(url)):
+        found = discover.find_detector()
+        if found:
+            url = found
+
     if url or not config.ALLOW_LOCAL_MODEL:
         return detector_for(url)
 

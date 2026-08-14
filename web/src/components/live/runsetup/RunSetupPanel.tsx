@@ -125,6 +125,7 @@ export function RunSetupPanel({
     <form
       onSubmit={submit}
       aria-label="New run"
+      data-pad-scope
       className="absolute inset-y-0 left-0 z-30 flex w-[min(420px,34vw)] min-w-[340px] flex-col border-r border-ink-800 bg-ink-950/95 backdrop-blur-xl"
     >
       <header className="flex items-center justify-between gap-3 border-b border-ink-700 px-4 py-3">

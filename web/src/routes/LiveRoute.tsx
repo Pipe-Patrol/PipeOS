@@ -4,9 +4,10 @@ import { FinishRunPrompt } from '@/components/live/FinishRunPrompt'
 import { NoRunOverlay } from '@/components/live/NoRunOverlay'
 import { RegionDrawer } from '@/components/live/RegionDrawer'
 import { RunSetupPanel, type RunDraft } from '@/components/live/runsetup/RunSetupPanel'
+import { GamepadGuideOverlay } from '@/components/live/GamepadGuideOverlay'
 import { ShortcutOverlay } from '@/components/live/ShortcutOverlay'
 import { VideoFeed } from '@/components/live/VideoFeed'
-import { ZoomControl } from '@/components/live/ZoomControl'
+import { ZoomControl, clampZoom } from '@/components/live/ZoomControl'
 import { PipeMap } from '@/components/map/PipeMap'
 import { ProfileStrip } from '@/components/profile/ProfileStrip'
 import { DetectionBoxes } from '@/components/overlay/DetectionBoxes'
@@ -19,6 +20,12 @@ import { ToolPalette, type PanelId } from '@/components/panel/ToolPalette'
 import { FinishIcon } from '@/components/primitives/icons'
 import { PoweredOff } from '@/components/shell/ShutdownDialog'
 import { useDriveInput } from '@/input/useDriveInput'
+import {
+  activateFocused,
+  moveFocus,
+  panelHasFocus,
+  stepSelect,
+} from '@/input/focusRoving'
 import { DEFECT_TYPES } from '@/constants/defects'
 import { detectionClassOf } from '@/constants/detection-classes'
 import { readError } from '@/lib/errors'
@@ -34,6 +41,18 @@ import { describeSpike, useClimateSpikes } from '@/robot/useClimateSpikes'
 import { useLiveTrail } from '@/robot/useLiveTrail'
 import { useRun } from '@/robot/useRun'
 import type { DefectRegion, Detection, Run } from '@/robot/types'
+
+/**
+ * How far one press of the d-pad moves the zoom.
+ *
+ * Finer than the on-screen buttons' step. A pointer can drag the zoom
+ * continuously and a d-pad cannot, so the pad gets smaller increments to land
+ * on a useful magnification instead of stepping over it.
+ */
+const PAD_ZOOM_STEP = 0.25
+
+/** Pixels per frame at full stick deflection. */
+const PAN_SPEED_PX = 8
 
 /** A key typed into a field is not a shortcut. */
 function isTyping(target: EventTarget | null): boolean {
@@ -78,6 +97,9 @@ export function LiveRoute() {
    */
   const [prefill, setPrefill] = useState<{ code?: string; note?: string } | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  // The pad diagram on its own. Separate from the shortcut sheet because the
+  // right stick opens exactly this and nothing else.
+  const [showPadGuide, setShowPadGuide] = useState(false)
   const [starting, setStarting] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
   const [finishing, setFinishing] = useState(false)
@@ -105,6 +127,8 @@ export function LiveRoute() {
 
   // The feed's height, published for every panel to cap itself against.
   const feedRef = useRef<HTMLElement>(null)
+  // Filled in by VideoFeed, which owns the pan and its bounds.
+  const panRef = useRef<((dx: number, dy: number) => void) | null>(null)
   useFeedBounds(feedRef)
 
   // Stamped here, where the box is actually committed, so the panel's still
@@ -200,6 +224,9 @@ export function LiveRoute() {
   // Driving is locked while any of these has the screen — including drawing,
   // where the operator is pointing at pipe wall rather than watching where the
   // robot is going, and a stray key would move it out from under the box.
+  // showPadGuide is deliberately NOT in here. It is a reference an operator
+  // opens mid-crawl, and locking driving behind it would also disable the pad
+  // handling that closes it -- the button would open a panel it could not shut.
   const modalOpen = showShortcuts || setupOpen || drawingRegion !== null || finishing
 
   const startDrawingRegion = useCallback((className: string, label: string) => {
@@ -308,6 +335,62 @@ export function LiveRoute() {
     [client],
   )
 
+  const setLed = useCallback(
+    (level: number) => {
+      setLedLevel(level)
+      client?.setLed(level)
+    },
+    [client],
+  )
+
+  // A plain object, not a useMemo: `visibleDetections` is rebuilt from
+  // telemetry on every render, so a memo over it would never hit -- and
+  // useDriveInput keeps these in a ref, so their identity does not matter.
+  // A plain object, not a useMemo: `visibleDetections` is rebuilt from
+  // telemetry on every render, so a memo over it would never hit -- and
+  // useDriveInput keeps these in a ref, so their identity does not matter.
+  const gamepadActions = {
+    /**
+     * Circle means "press this", and what "this" is depends on what is open.
+     *
+     * With a panel up it clicks whatever L1/R1 last focused; on the bare
+     * driving screen there is nothing focused to press, so it falls back to the
+     * thing an operator most often wants at that moment -- filing the detection
+     * the model is surest about.
+     */
+    onConfirm: () => {
+      if (panelHasFocus() && activateFocused()) return
+
+      const best = visibleDetections.reduce<Detection | null>(
+        (winner, detection) =>
+          winner === null || detection.confidence > winner.confidence
+            ? detection
+            : winner,
+        null,
+      )
+      if (best) flagDetection(best)
+    },
+    // L1/R1 step a focused dropdown's value before they move focus, so a
+    // select is changed rather than skipped past.
+    onFocusNext: () => {
+      if (!stepSelect(1)) moveFocus(1)
+    },
+    onFocusPrevious: () => {
+      if (!stepSelect(-1)) moveFocus(-1)
+    },
+    onToggleLights: () => setLed(ledLevel > 0 ? 0 : 1),
+    onToggleRecording: () => void toggleRecording(),
+    onZoomIn: () => setZoom((current) => clampZoom(current + PAD_ZOOM_STEP)),
+    onZoomOut: () => setZoom((current) => clampZoom(current - PAD_ZOOM_STEP)),
+    // The LED ring, not the camera: on the pad the thing worth reaching for
+    // mid-crawl is how much light is going down the pipe.
+    onLightsBrighter: () => setLed(Math.min(1, Math.round((ledLevel + 0.2) * 10) / 10)),
+    onLightsDarker: () => setLed(Math.max(0, Math.round((ledLevel - 0.2) * 10) / 10)),
+    onResetView: () => setZoom(1),
+    onShowGuide: () => setShowPadGuide((open) => !open),
+    onReturnHome: () => home.engage('manual'),
+  }
+
   const drive = useDriveInput({
     client,
     // Locked whenever a command could not be trusted to arrive, or a dialog has
@@ -321,15 +404,29 @@ export function LiveRoute() {
       telemetry?.drive.hardware === true &&
       telemetry?.drive.armed === true,
     onSnapshot: () => void snapshot(),
+    actions: gamepadActions,
   })
 
-  const setLed = useCallback(
-    (level: number) => {
-      setLedLevel(level)
-      client?.setLed(level)
-    },
-    [client],
-  )
+  /**
+   * The right stick pans the zoomed frame.
+   *
+   * Driven on a frame loop rather than from the stick's value changing: a stick
+   * held still at full deflection produces no further events, and the operator
+   * expects it to keep panning while they hold it. Speed scales with the zoom
+   * so a nudge covers the same amount of *picture* at 1x and at 4x.
+   */
+  const panVector = drive.pan
+  useEffect(() => {
+    if (panVector.x === 0 && panVector.y === 0) return
+    let frame = 0
+    const step = () => {
+      frame = requestAnimationFrame(step)
+      panRef.current?.(panVector.x * PAN_SPEED_PX, panVector.y * PAN_SPEED_PX)
+    }
+    frame = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(frame)
+  }, [panVector])
+
 
   // Both failures an operator cannot see the cause of. They go to the one bar
   // above the status bar rather than being drawn next to the button that
@@ -460,6 +557,7 @@ export function LiveRoute() {
           zoom={zoom}
           onZoom={setZoom}
           stale={link.state !== 'connected'}
+          panRef={panRef}
         />
 
         {/* The feed is dimmed until a run is open. Nothing on screen is being
@@ -675,6 +773,8 @@ export function LiveRoute() {
       )}
 
       {showShortcuts && <ShortcutOverlay onClose={() => setShowShortcuts(false)} />}
+
+      {showPadGuide && <GamepadGuideOverlay onClose={() => setShowPadGuide(false)} />}
     </div>
   )
 }

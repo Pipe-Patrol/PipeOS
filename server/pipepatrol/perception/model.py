@@ -92,6 +92,11 @@ class RFDetrDetector:
         self._model = None
         self._anomaly = AnomalyBank(anomaly_bank) if anomaly_bank else None
         self._failed = False
+        # Part of the backend contract, alongside `name` and `available`. The
+        # console shows it, the catalogue reads it, and a backend without one
+        # takes them both down with an AttributeError the moment it becomes
+        # available -- which is to say, the moment somebody installs the model.
+        self.error = None
 
     @property
     def available(self):
@@ -121,6 +126,10 @@ class RFDetrDetector:
             except Exception as exc:  # noqa: BLE001 - unavailable, not fatal
                 log.warning("detector unavailable: %s", exc)
                 self._failed = True
+                # torch or the rfdetr package missing is the usual one, and
+                # "unavailable" on its own sends somebody to the checkpoint
+                # rather than to pip.
+                self.error = f"could not load the checkpoint: {exc}"
                 return []
 
         from PIL import Image

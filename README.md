@@ -85,8 +85,9 @@ redeploying in **Settings → Detection host**.
 torch, and the one that has been down a pipe. `rfdetr-torch` is the newer
 checkpoint under torch, with an optional clean-pipe bank that flags conditions
 outside the seven classes as `UNKNOWN`; it is not QC'd yet. Switch between them
-in **Settings → Detection host → Model**. The button switches the laptop, not
-the robot, and one that is not installed is shown greyed with the reason.
+in **Settings → Detection host → Model**. Installing one is copying its `.pth`
+into `server/model/` — no restart, no redeploy — and the button switches your
+laptop, not the robot.
 
 Without a reachable host the robot still drives, records and logs defects by
 hand; it just detects nothing. See [MODEL.md](MODEL.md) for the class list and
@@ -133,14 +134,19 @@ This is a prototype's rule, and it is optional — see below.
 
 ## 4. Optional: make it an appliance
 
-Three one-time changes turn the robot into something you power on, connect to,
-and use, with no SSH and no shutdown ritual — and that survives having its plug
-pulled. See **[docs/APPLIANCE.md](docs/APPLIANCE.md)**.
+One command turns the robot into something you power on, join, and use — no
+SSH, no shutdown ritual, and it survives having its plug pulled. Fit a USB
+stick first; that is where recordings go.
 
 ```bash
-sudo ~/PipeOS/server/deploy/hotspot.sh enable        # robot hosts its own WiFi
-sudo ~/PipeOS/server/deploy/readonly-root.sh enable --data-device /dev/sda1
+./deploy.sh --appliance
 ```
+
+Then: switch on, join the `PipePatrol` network, and the console opens by
+itself. Switch off when you are done. Deploying afterwards is still just
+`./deploy.sh` — it takes the card lock off and puts it back for you.
+
+See **[docs/APPLIANCE.md](docs/APPLIANCE.md)**.
 
 ---
 

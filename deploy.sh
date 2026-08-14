@@ -5,10 +5,18 @@
 #   ./deploy.sh                        # pipepatrol@pipepatrol.local
 #   ./deploy.sh pipepatrol@10.83.0.112 # by IP, when the name will not resolve
 #   ./deploy.sh --no-service           # copy and install, but do not touch systemd
+#   ./deploy.sh --appliance            # deploy, then turn it into an appliance
+#   ./deploy.sh --stay-unlocked        # leave the card writable afterwards
 #
 # What it does, in order: checks it can reach the robot, builds the console
 # here, copies the repo over, builds the Python environment there, then
 # installs and restarts the service.
+#
+# THE CARD LOCK IS HANDLED FOR YOU. A robot set up as an appliance has a
+# read-only root, which cannot be rsynced to. This script unlocks it, reboots,
+# deploys, locks it again and reboots back -- so a deploy is still one command
+# and the robot is still an appliance at the end of it. --stay-unlocked skips
+# the relock, for when you are about to deploy again in a minute.
 #
 # IT REPLACES THE EXISTING pipepatrol.service. If that unit currently points at
 # PipePatrolTesting, this is the step that switches the robot over. The old
@@ -19,10 +27,14 @@ set -euo pipefail
 
 TARGET="pipepatrol@pipepatrol.local"
 INSTALL_SERVICE=1
+MAKE_APPLIANCE=0
+RELOCK=1
 
 for arg in "$@"; do
   case "$arg" in
     --no-service) INSTALL_SERVICE=0 ;;
+    --appliance) MAKE_APPLIANCE=1 ;;
+    --stay-unlocked) RELOCK=0 ;;
     # Print the header block: every comment line after the shebang, stopping at
     # the first line that is not one. A fixed line range drifts as this file
     # gets edited, and a help text that has drifted is worse than none.
@@ -63,6 +75,42 @@ lan_address_towards() {
     return 0
   fi
   return 1
+}
+
+# Block until the robot answers ssh again, or give up. Used either side of the
+# reboots this script now does on your behalf.
+#
+# The first few seconds after `reboot` are the trap: sshd is still up on the way
+# down, so a probe that starts immediately can succeed against a Pi that is
+# about to vanish and then report success. Hence the initial pause -- long
+# enough for the socket to actually go away before anything believes an answer.
+wait_for_ssh() {
+  local deadline=$((SECONDS + ${2:-150}))
+  printf '    waiting for %s' "$HOST"
+  sleep 12
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 \
+           -o StrictHostKeyChecking=accept-new "$TARGET" true 2>/dev/null; then
+      printf ' back.\n'
+      return 0
+    fi
+    printf '.'
+    sleep 5
+  done
+  printf '\n'
+  echo "$HOST did not come back within ${2:-150}s." >&2
+  return 1
+}
+
+# Reboot the robot and wait for it. `reboot` kills the connection it was issued
+# over, so ssh exits non-zero on success -- which is why the result is ignored.
+reboot_and_wait() {
+  ssh -t "$TARGET" 'sudo systemctl reboot' >/dev/null 2>&1 || true
+  wait_for_ssh
+}
+
+root_is_readonly() {
+  ssh -o BatchMode=yes "$TARGET" 'findmnt -no OPTIONS / | grep -qw ro' 2>/dev/null
 }
 
 # --- 1. can we reach the robot? -----------------------------------------------
@@ -110,28 +158,38 @@ EOF
   exit 1
 fi
 
-# --- 1b. is the root filesystem writable? -------------------------------------
+# --- 1b. unlock the card, if it is locked -------------------------------------
 # Before the build, for the same reason the reachability probe is: a read-only
 # root takes rsync's copy into a RAM overlay, where every step below succeeds,
 # the console looks updated, and the next reboot silently throws the whole
-# deploy away. A confusing success is worse than a clear refusal.
+# deploy away.
+#
+# This used to refuse and print the four commands to run by hand. It does them
+# instead. The refusal was correct and it was still the wrong behaviour: it made
+# every deploy to a finished robot a manual unlock/reboot/deploy/relock/reboot
+# cycle, which is exactly the kind of ritual the appliance work exists to
+# delete. WAS_LOCKED is what step 7 uses to put it back the way it found it.
 
 step "Checking the robot's filesystem is writable"
-if ssh "$TARGET" 'findmnt -no OPTIONS / | grep -qw ro'; then
-  cat <<EOF
+WAS_LOCKED=0
+if root_is_readonly; then
+  WAS_LOCKED=1
+  echo "Read-only (the card is locked). Unlocking and rebooting -- about a minute."
+  ssh -t "$TARGET" 'sudo ~/PipeOS/server/deploy/readonly-root.sh disable'
+  reboot_and_wait
 
-The robot's root filesystem is READ-ONLY (the overlay is on). Nothing was
-copied. Anything written now would live in RAM and be lost at the next reboot.
-
-Turn it off, deploy, then turn it back on:
-
-    ssh $TARGET 'sudo ~/PipeOS/server/deploy/readonly-root.sh disable && sudo reboot'
-    ./deploy.sh $TARGET
-    ssh $TARGET 'sudo ~/PipeOS/server/deploy/readonly-root.sh enable --data-device /dev/sda1 && sudo reboot'
-EOF
-  exit 1
+  # The overlay only lifts at boot, so this is the check that it actually did.
+  # A Pi that came back still read-only means the reboot did not take, and every
+  # step below would land in RAM.
+  if root_is_readonly; then
+    echo "Still read-only after the reboot. Nothing was copied." >&2
+    echo "Check by hand: ssh $TARGET 'sudo ~/PipeOS/server/deploy/readonly-root.sh status'" >&2
+    exit 1
+  fi
+  echo "Writable."
+else
+  echo "Writable."
 fi
-echo "Writable."
 
 # --- 2. the console, built here ------------------------------------------------
 # Built on this machine rather than on the Pi: a Pi 5 can run npm, but it takes
@@ -343,6 +401,48 @@ else
   step "Skipping systemd (--no-service)"
   echo "Start it by hand with:"
   echo "  ssh $TARGET 'cd PipeOS/server && .venv/bin/python -m pipepatrol'"
+fi
+
+# --- 7. appliance ------------------------------------------------------------
+# The one-time conversion, driven from here rather than left as two scripts to
+# run on the Pi over SSH. Both are idempotent, so running --appliance against a
+# robot that is already one is a no-op that reports the state.
+
+if [ "$MAKE_APPLIANCE" -eq 1 ]; then
+  step "Turning the robot into an appliance"
+  ssh -t "$TARGET" '
+    set -euo pipefail
+    sudo ~/PipeOS/server/deploy/hotspot.sh enable
+    echo
+    # Picks the data device itself when there is exactly one candidate. Asking
+    # from here is not possible -- this is running down an ssh pipe -- and
+    # guessing between two sticks is worse than saying so.
+    sudo ~/PipeOS/server/deploy/readonly-root.sh enable --auto-data-device
+  '
+  WAS_LOCKED=1
+fi
+
+# --- 8. lock the card back ----------------------------------------------------
+# Whatever state the card was in at step 1b, it is in again now. Without this,
+# one deploy quietly demotes a finished robot back to a prototype that has to be
+# shut down properly -- and nothing would say so until the card corrupted.
+
+if [ "$WAS_LOCKED" -eq 1 ] && [ "$RELOCK" -eq 1 ]; then
+  step "Locking the card and rebooting"
+  ssh -t "$TARGET" 'sudo ~/PipeOS/server/deploy/readonly-root.sh relock'
+  reboot_and_wait
+
+  if root_is_readonly; then
+    echo "Locked. The power switch is the off switch again."
+  else
+    echo "WARNING: the robot came back WRITABLE. Shut it down properly until this is"
+    echo "         sorted: ssh $TARGET 'sudo poweroff'"
+    echo "         Check with: readonly-root.sh status"
+  fi
+elif [ "$WAS_LOCKED" -eq 1 ]; then
+  step "Leaving the card unlocked (--stay-unlocked)"
+  echo "The robot needs a proper shutdown until it is locked again."
+  echo "Lock it with:  ./deploy.sh $TARGET   (any deploy puts it back)"
 fi
 
 step "Done"

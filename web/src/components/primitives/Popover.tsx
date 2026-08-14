@@ -68,6 +68,11 @@ export function Popover({
   return (
     <div
       ref={ref}
+      // Marks this as a scope for the gamepad's shoulder buttons: with it open,
+      // L1/R1 walk only the controls inside it. Without a marker they would
+      // walk the whole document, which means pressing buttons behind the panel
+      // that the operator cannot see. See input/focusRoving.ts.
+      data-pad-scope
       className="panel fixed top-1/2 right-[84px] z-50 flex max-h-[var(--feed-h,calc(100dvh_-_2rem))] w-72 -translate-y-1/2 flex-col overflow-hidden"
     >
       <header className="flex items-center justify-between border-b border-ink-800 px-3 py-2">

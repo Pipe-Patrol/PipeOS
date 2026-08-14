@@ -55,6 +55,12 @@ MIN_INFERENCE_INTERVAL_S = 0.2
 # detection silently switched off.
 DEMO_HOLDOFF_S = 5.0
 
+# Failed inferences between attempts to find the model elsewhere. Each failure
+# already costs a second of backoff, so this is roughly "look again every five
+# seconds" -- fast enough that joining the robot's WiFi feels like it just
+# works, slow enough not to sweep the network continuously.
+REDISCOVER_EVERY = 5
+
 
 class Detection:
     """One model output, stamped with where and when it was seen."""
@@ -96,7 +102,7 @@ class NullDetector:
     def __init__(self, note=None):
         self.error = note
 
-    def infer(self, jpeg):  # noqa: ARG002 - the signature is the contract
+    def infer(self, jpeg, min_confidence=None):  # noqa: ARG002 - the signature IS the contract
         return []
 
 
@@ -107,9 +113,15 @@ class DetectionService:
     `infer(jpeg) -> list[Detection]`.
     """
 
-    def __init__(self, camera, detector=None, chainage_source=None):
+    def __init__(self, camera, detector=None, chainage_source=None, rediscover=None):
         self._camera = camera
         self._detector = detector or NullDetector()
+        # Called after a run of failed inferences to go looking for the model
+        # somewhere else. Returns a replacement backend, or None to keep this
+        # one. Injected rather than imported so this class still knows nothing
+        # about networks; see perception/discover.py.
+        self._rediscover = rediscover
+        self._consecutive_failures = 0
         # Called for each inference to stamp detections with where the robot was.
         self._chainage_source = chainage_source
         self._lock = threading.Lock()
@@ -231,9 +243,28 @@ class DetectionService:
             try:
                 found = self._detector.infer(jpeg)
                 self._error = None
+                self._consecutive_failures = 0
             except Exception as exc:  # noqa: BLE001 - a model fault must not stop driving
                 log.warning("inference failed: %s", exc)
                 self._error = f"{type(exc).__name__}: {exc}"
+                self._consecutive_failures += 1
+
+                # The normal case, not an exotic one: the robot boots before the
+                # laptop joins its network, so the address it started with is
+                # stale from the first frame. Without this the robot would keep
+                # posting into the void for the whole run -- correct at boot and
+                # wrong forever after, which is no better than not looking.
+                #
+                # Rate-limited rather than every failure: a model host that is
+                # up but throwing would otherwise trigger a network sweep
+                # several times a second.
+                if self._rediscover and self._consecutive_failures % REDISCOVER_EVERY == 0:
+                    replacement = self._rediscover()
+                    if replacement is not None:
+                        log.info("detection host moved; switching backend")
+                        self.set_backend(replacement)
+                        self._consecutive_failures = 0
+
                 self._stop.wait(1.0)
                 continue
 
@@ -266,13 +297,7 @@ class DetectionService:
         # Marked before the inference, not after: a slow model must not let the
         # camera loop start a second one while this is still running.
         self._supplied_at = time.monotonic()
-        # Not every backend takes a floor -- NullDetector does not -- so it is
-        # only passed when asked for.
-        found = (
-            self._detector.infer(jpeg, min_confidence)
-            if min_confidence is not None
-            else self._detector.infer(jpeg)
-        )
+        found = self._detector.infer(jpeg, min_confidence)
         self._supplied_at = time.monotonic()
         chainage = self._chainage_source() if self._chainage_source else None
         for detection in found:

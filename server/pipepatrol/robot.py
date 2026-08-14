@@ -23,7 +23,7 @@ import time
 from pipepatrol import config, telemetry
 from pipepatrol.estimation import Hazards, OpticalFlow, Odometry
 from pipepatrol.hardware import Camera, Climate, Drive, IMU, Lights, host
-from pipepatrol.perception import DetectionService, best_detector
+from pipepatrol.perception import DetectionService, best_detector, rediscover_detector
 from pipepatrol.runs import Recorder, RunStore
 
 log = logging.getLogger(__name__)
@@ -57,6 +57,10 @@ class Robot:
             # is usable. Either way the console renders detections the same way.
             detector=best_detector(),
             chainage_source=lambda: self.odometry.status()["chainage_m"],
+            # The robot is almost always up before the laptop joins its network,
+            # so the host chosen above is routinely stale by the first frame.
+            # This is what lets it correct itself mid-run.
+            rediscover=rediscover_detector,
         )
 
         self._active_run_id = None

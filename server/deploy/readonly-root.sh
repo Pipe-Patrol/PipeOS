@@ -4,6 +4,8 @@
 #
 #   sudo ~/PipeOS/server/deploy/readonly-root.sh status
 #   sudo ~/PipeOS/server/deploy/readonly-root.sh enable --data-device /dev/sda1
+#   sudo ~/PipeOS/server/deploy/readonly-root.sh enable --auto-data-device
+#   sudo ~/PipeOS/server/deploy/readonly-root.sh relock
 #   sudo ~/PipeOS/server/deploy/readonly-root.sh disable
 #
 # THE PROBLEM
@@ -23,9 +25,11 @@
 # genuinely what you want.
 #
 # DEPLOYING
-# A read-only root cannot be rsynced to. Run `disable`, reboot, deploy, then
-# `enable` and reboot again. deploy.sh checks for this and says so rather than
-# appearing to succeed and losing the copy at the next reboot.
+# A read-only root cannot be rsynced to, so it has to come off and go back on
+# around a deploy. deploy.sh does that for you -- it unlocks, reboots, copies,
+# then `relock`s and reboots back. `relock` is `enable` for a robot that has
+# been set up already: it turns the overlay back on and reuses the data device
+# from last time rather than asking for it again.
 
 set -euo pipefail
 
@@ -119,6 +123,43 @@ setup_data_device() {
   echo "Runs will be written to $DATA_MOUNT/data on $device."
 }
 
+# The USB stick, worked out rather than typed. Removable partitions only, which
+# on a Pi excludes the SD card the system is running from -- picking that would
+# mean mounting root's own card over /var/lib/pipepatrol.
+#
+# Refuses on two candidates instead of choosing. This runs unattended from
+# deploy.sh, and a wrong guess here is the recordings going to a stick nobody
+# meant to use.
+auto_data_device() {
+  # An array, not a string to be counted afterwards: `grep -c` exits non-zero
+  # when it counts nothing, and under `set -e` "there is no USB stick" would
+  # then kill the script before it could print the sentence explaining that.
+  local candidates=()
+  while read -r path; do
+    [ -n "$path" ] && candidates+=("$path")
+  done < <(lsblk -rno PATH,TYPE,RM 2>/dev/null | awk '$2=="part" && $3=="1" {print $1}')
+
+  case "${#candidates[@]}" in
+    1) printf '%s' "${candidates[0]}" ;;
+    0)
+      echo "No removable drive found to keep the runs on." >&2
+      echo "Fit a USB stick and format it (this ERASES it):" >&2
+      echo "    lsblk" >&2
+      echo "    sudo mkfs.ext4 -L pipepatrol /dev/sda1" >&2
+      echo >&2
+      echo "Or accept that runs do not survive a reboot:" >&2
+      echo "    sudo $0 enable --ephemeral-data" >&2
+      return 1
+      ;;
+    *)
+      echo "More than one removable drive; not guessing which one is for runs:" >&2
+      printf '    %s\n' "${candidates[@]}" >&2
+      echo "Name it:  sudo $0 enable --data-device /dev/sdX1" >&2
+      return 1
+      ;;
+  esac
+}
+
 write_override() {
   mkdir -p "$OVERRIDE_DIR"
   cat > "$OVERRIDE" <<EOF
@@ -140,16 +181,32 @@ case "${1:-status}" in
     require_root enable "$@"
     device=""
     ephemeral=0
+    auto=0
     while [ $# -gt 0 ]; do
       case "$1" in
         --data-device) device="${2:-}"; shift 2 ;;
+        --auto-data-device) auto=1; shift ;;
         --ephemeral-data) ephemeral=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 1 ;;
       esac
     done
 
+    # Already set up: the fstab entry and the override are there from last time,
+    # so there is nothing to pick. Matters because --appliance is meant to be
+    # safe to run twice, and the second run has no stick left to discover.
+    keep_existing=0
+    if [ "$auto" -eq 1 ] && [ -z "$device" ] && [ -f "$OVERRIDE" ]; then
+      keep_existing=1
+    elif [ "$auto" -eq 1 ] && [ -z "$device" ]; then
+      device="$(auto_data_device)" || exit 1
+      echo "Using $device for the runs."
+    fi
+
     if [ -n "$device" ]; then
       setup_data_device "$device"
+    elif [ "$keep_existing" -eq 1 ]; then
+      echo "Runs directory already configured; keeping it."
+      sed -n 's/^Environment=PIPEPATROL_DATA=/    /p' "$OVERRIDE"
     elif [ "$ephemeral" -eq 1 ]; then
       echo "WARNING: no data device. Every run and recording will be lost at reboot."
     else
@@ -176,7 +233,30 @@ case "${1:-status}" in
     echo "    sudo reboot"
     echo
     echo "After that the card is protected and the power switch is the off switch."
-    echo "To deploy again:  sudo $0 disable && sudo reboot"
+    echo "Deploying again needs nothing from you: ./deploy.sh unlocks and relocks."
+    ;;
+
+  relock)
+    # `enable` for a robot that has already been set up: turn the overlay back
+    # on, reusing the data device from last time. This is what deploy.sh runs
+    # after copying, and it is deliberately not `enable` -- enable's job is to
+    # refuse when there is nowhere to keep the runs, and asking that question
+    # again on every deploy would mean either answering it or seeing it fail.
+    require_root relock
+    if [ ! -f "$OVERRIDE" ]; then
+      echo "This robot has never been set up for a read-only root." >&2
+      echo "There is no runs directory configured, so locking now would throw" >&2
+      echo "every recording away at each reboot. Set it up first:" >&2
+      echo "    sudo $0 enable --auto-data-device" >&2
+      exit 1
+    fi
+
+    raspi-config nonint enable_overlayfs
+    raspi-config nonint enable_bootro || \
+      echo "note: could not set /boot read-only; the overlay is still on."
+
+    echo "Locked again at the next boot. Runs go to:"
+    sed -n 's/^Environment=PIPEPATROL_DATA=/    /p' "$OVERRIDE"
     ;;
 
   disable)
@@ -186,8 +266,8 @@ case "${1:-status}" in
     echo "Disabled. Reboot to get a writable root back:"
     echo "    sudo reboot"
     echo
-    echo "The card is unprotected until you re-enable it. Deploy, then:"
-    echo "    sudo $0 enable --data-device /dev/sda1 && sudo reboot"
+    echo "The card is unprotected until it goes back on. Deploy, then:"
+    echo "    sudo $0 relock && sudo reboot"
     ;;
 
   -h|--help)

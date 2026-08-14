@@ -1,11 +1,14 @@
 """HTTP and WebSocket surface. Routers reach hardware only through deps.get_robot."""
 
-from pipepatrol.api import control, media, power, preflight, reasoning, runs, system
+from pipepatrol.api import (
+    control, media, portal, power, preflight, reasoning, runs, system,
+)
 
 ROUTERS = (
     system.router,
     control.router,
     media.router,
+    portal.router,
     power.router,
     preflight.router,
     reasoning.router,
@@ -13,6 +16,6 @@ ROUTERS = (
 )
 
 __all__ = [
-    "ROUTERS", "control", "media", "power", "preflight", "reasoning",
+    "ROUTERS", "control", "media", "portal", "power", "preflight", "reasoning",
     "runs", "system",
 ]

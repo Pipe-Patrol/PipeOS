@@ -214,3 +214,96 @@ class TestExport:
         run = Run(name="Elm St / MH-12: north")
         assert "/" not in export.filename_for(run, "csv")
         assert export.filename_for(run, "csv").endswith(".csv")
+
+
+class TestDeletingVideo:
+    """Video is almost all of what a run weighs, and the only part worth deleting.
+
+    Deleting it must never take the inspection record with it: the defects, the
+    stills and the path are what somebody is going to be asked for, and they are
+    small enough that keeping them costs nothing.
+    """
+
+    def _recorded(self, store, count=2):
+        from pipepatrol.runs.models import Recording
+
+        run = store.create(name="with video")
+        directory = store.run_dir(run.id)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        clips = []
+        for index in range(count):
+            clip = Recording(frames=10, bytes=1000)
+            clip.file = f"clip{index}.mjpeg"
+            clip.index_file = f"clip{index}.idx"
+            (directory / clip.file).write_bytes(b"x" * 1000)
+            (directory / clip.index_file).write_bytes(b"i" * 10)
+            store.add_recording(run.id, clip)
+            clips.append(clip)
+        return run, clips
+
+    def test_one_clips_files_go_with_its_entry(self, store):
+        run, clips = self._recorded(store)
+        directory = store.run_dir(run.id)
+
+        deleted, freed = store.delete_recording(run.id, clips[0].id)
+
+        assert deleted is True
+        assert freed == 1010
+        assert not (directory / clips[0].file).exists()
+        assert not (directory / clips[0].index_file).exists()
+        # The other clip is untouched.
+        assert (directory / clips[1].file).exists()
+        assert [r.id for r in store.get(run.id).recordings] == [clips[1].id]
+
+    def test_deleting_all_clips_keeps_the_run(self, store):
+        run, _ = self._recorded(store)
+        store.add_defect(
+            run.id, __import__("pipepatrol.runs.models", fromlist=["Defect"]).Defect(code="CR")
+        )
+
+        count, freed = store.delete_recordings(run.id)
+
+        assert count == 2
+        assert freed == 2020
+        after = store.get(run.id)
+        assert after is not None
+        assert after.recordings == []
+        # The record survives. That is the whole point of deleting video rather
+        # than deleting the run.
+        assert len(after.defects) == 1
+
+    def test_a_clip_that_is_not_there_is_not_an_error_state(self, store):
+        run, _ = self._recorded(store)
+        deleted, freed = store.delete_recording(run.id, "nosuchclip")
+        assert deleted is False
+        assert freed == 0
+
+    def test_deleting_all_of_nothing_is_fine(self, store):
+        run = store.create(name="no video")
+        assert store.delete_recordings(run.id) == (0, 0)
+
+    def test_missing_files_do_not_stop_the_entry_going(self, store):
+        """A clip whose file was already removed by hand must still be clearable."""
+        run, clips = self._recorded(store, count=1)
+        (store.run_dir(run.id) / clips[0].file).unlink()
+
+        deleted, _ = store.delete_recording(run.id, clips[0].id)
+
+        assert deleted is True
+        assert store.get(run.id).recordings == []
+
+    def test_all_video_everywhere_goes_in_one_press(self, store):
+        """The bulk button. Every run keeps everything except its footage."""
+        first, _ = self._recorded(store, count=2)
+        second, _ = self._recorded(store, count=1)
+        store.create(name="never recorded")
+
+        runs, clips, freed = store.delete_all_recordings()
+
+        assert (runs, clips) == (2, 3)
+        assert freed == 3030
+        assert store.get(first.id).recordings == []
+        assert store.get(second.id).recordings == []
+        # Three runs still exist. Only video went.
+        assert len(store.list()) == 3

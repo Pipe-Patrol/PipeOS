@@ -29,7 +29,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'forward',
-    instruction: 'Push the left stick forward, or press up on the D-pad',
+    instruction: 'Push the left stick forward, or squeeze L2',
     done: (pad) => pad.throttle >= 0.5,
   },
   {
@@ -39,8 +39,8 @@ const STEPS: Step[] = [
   },
   {
     id: 'capture',
-    instruction: 'Press the A button',
-    done: (pad) => pad.pressed.includes(GAMEPAD_BUTTONS.A),
+    instruction: 'Press the cross button',
+    done: (pad) => pad.pressed.includes(GAMEPAD_BUTTONS.CROSS),
   },
 ]
 

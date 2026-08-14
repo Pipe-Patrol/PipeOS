@@ -6,6 +6,7 @@ import {
   Sliders,
   Sparkle,
   SteeringWheel,
+  Trash,
 } from '@phosphor-icons/react'
 
 import {
@@ -264,5 +265,12 @@ export function CloseIcon({ size, weight, className }: IconProps) {
     <Svg size={size} weight={weight} className={className}>
       <path d="M6 6l12 12M18 6L6 18" />
     </Svg>
+  )
+}
+
+/** Delete. From Phosphor rather than drawn here, like every other glyph. */
+export function TrashIcon({ size, weight, className }: IconProps) {
+  return (
+    <Phosphor icon={Trash} size={size} weight={weight} className={className} />
   )
 }

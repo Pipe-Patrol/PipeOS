@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 
+import { GamepadGuide } from '@/components/live/GamepadGuide'
 import { ShortcutList } from '@/components/live/ShortcutList'
 import { Button } from '@/components/primitives/Button'
 import { Choice, Fact, Range, Row, Section, Toggle } from '@/components/settings/controls'
@@ -9,6 +10,7 @@ import { ModelSettings } from '@/components/settings/ModelSettings'
 import { NorthReference } from '@/components/settings/NorthReference'
 import { Page } from '@/components/shell/Page'
 import { PoweredOff, ShutdownDialog } from '@/components/shell/ShutdownDialog'
+import { readError } from '@/lib/errors'
 import * as format from '@/lib/format'
 import { resetPreferences, setPreference, usePreferences } from '@/lib/preferences'
 import { useTempUnit } from '@/lib/units'
@@ -38,6 +40,51 @@ export function SettingsRoute() {
   const [halted, setHalted] = useState(false)
   const [unit, setUnit] = useTempUnit()
   const prefs = usePreferences()
+  const [wiping, setWiping] = useState(false)
+  const [wipeResult, setWipeResult] = useState<string | null>(null)
+
+  /**
+   * Delete every clip on the robot, keeping every run.
+   *
+   * The bulk version of the per-run button on a run's own page, for the case
+   * that actually happens: a card that is full now, where clearing it run by
+   * run is a dozen confirmations deep. It never touches defects, captures or
+   * paths -- the inspection record is small and is the part anybody is going to
+   * be asked for.
+   *
+   * Confirmed, and deliberately not undoable-looking: there is no undo on an SD
+   * card, and a button that implied otherwise would be the lie.
+   */
+  const wipeVideo = async () => {
+    if (!client) return
+    if (
+      !window.confirm(
+        'Delete the video from every run on this robot?\n\n' +
+          'Defects, captures and paths are kept. The video files cannot be recovered.',
+      )
+    ) {
+      return
+    }
+    setWiping(true)
+    try {
+      const body = await client.request<{
+        runs: number
+        deleted: number
+        freed_bytes: number
+      }>('/api/runs/recordings', { method: 'DELETE' })
+      setWipeResult(
+        body.deleted === 0
+          ? 'Nothing to delete'
+          : `${body.deleted} clip${body.deleted === 1 ? '' : 's'} from ${body.runs} run${
+              body.runs === 1 ? '' : 's'
+            } · ${format.bytes(body.freed_bytes)} freed`,
+      )
+    } catch (caught) {
+      setWipeResult(readError(caught, 'could not delete the video'))
+    } finally {
+      setWiping(false)
+    }
+  }
 
   // Checked before the client guard on purpose. Halting clears the client, and
   // being bounced to the connect picker mid-shutdown would take away the one
@@ -258,9 +305,38 @@ export function SettingsRoute() {
 
       {/* The reference copy. `?` puts the same list over the video mid-run;
           this is where someone reads it before they are driving. */}
+      <Section
+        title="Storage"
+        description="Video is almost all of what the card holds. Deleting it keeps every run, its defects and its captures."
+      >
+        <Row
+          label="Delete all video"
+          hint="Every clip of every run, on the robot. There is no undo."
+        >
+          <button
+            type="button"
+            disabled={wiping}
+            onClick={() => void wipeVideo()}
+            className="rounded-sm px-2 py-1 text-[12px] text-ink-300 transition-colors hover:bg-white/8 hover:text-state-fault-signal disabled:opacity-40"
+          >
+            {wiping ? 'Deleting…' : 'Delete all video'}
+          </button>
+        </Row>
+        {wipeResult && <Fact label="Last wipe" value={wipeResult} />}
+      </Section>
+
       <Section title="Shortcuts">
         <div className="px-4 py-3">
           <ShortcutList />
+        </div>
+      </Section>
+
+      <Section
+        title="Controller"
+        description="The pad layout, for driving without a keyboard."
+      >
+        <div className="px-4 py-3">
+          <GamepadGuide />
         </div>
       </Section>
 

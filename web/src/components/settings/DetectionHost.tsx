@@ -200,7 +200,20 @@ function ModelPicker({ enabled }: { enabled: boolean }) {
 
   return (
     <div className="px-4 py-3">
-      <div className="label mb-2">Model</div>
+      <div className="mb-2 flex items-center justify-between">
+        <span className="label">Model</span>
+        {/* Because installing a model is dropping a file in a folder, and the
+            folder can be written to while this screen is open. Without this,
+            "I copied it in and it still says not installed" is a page reload
+            nobody knows to do. */}
+        <button
+          type="button"
+          onClick={load}
+          className="rounded-sm px-2 py-1 text-[11.5px] text-ink-400 transition-colors hover:bg-white/8 hover:text-ink-100"
+        >
+          Rescan
+        </button>
+      </div>
       <ul className="flex flex-col gap-1">
         {catalogue.models.map((model) => (
           <li key={model.id}>
