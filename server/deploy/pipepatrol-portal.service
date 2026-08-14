@@ -1,0 +1,18 @@
+[Unit]
+Description=PipePatrol console on port 80
+# The redirect names wlan0, so it needs the interface to exist. It does not need
+# the hotspot to be up: the rule is harmless until something arrives on it.
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+# The rule lives in the kernel, not in this process. Without this systemd counts
+# the unit as dead the moment the script exits and `stop` would never run the
+# teardown.
+RemainAfterExit=yes
+ExecStart=/home/pipepatrol/PipeOS/server/deploy/portal-redirect.sh up
+ExecStop=/home/pipepatrol/PipeOS/server/deploy/portal-redirect.sh down
+
+[Install]
+WantedBy=multi-user.target

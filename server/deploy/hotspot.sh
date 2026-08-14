@@ -6,6 +6,7 @@
 #   sudo ~/PipeOS/server/deploy/hotspot.sh status
 #   sudo ~/PipeOS/server/deploy/hotspot.sh enable
 #   sudo ~/PipeOS/server/deploy/hotspot.sh enable --ssid PipePatrol --password <8+ chars>
+#   sudo ~/PipeOS/server/deploy/hotspot.sh enable --no-portal
 #   sudo ~/PipeOS/server/deploy/hotspot.sh disable
 #
 # WHY
@@ -19,7 +20,18 @@
 # An always-on access point that comes up at boot, with the console at a fixed
 # address that never changes:
 #
-#     http://192.168.4.1:8000
+#     http://192.168.4.1
+#
+# Joining is usually all it takes -- the console opens by itself. Every name
+# resolves to the robot on this network and the console answers on port 80, so
+# a phone or laptop making its usual "am I online?" check reaches the console,
+# concludes it is behind a captive portal, and opens it. The address above is
+# the fallback for anything that does not, and :8000 still works throughout.
+#
+# The cost of that is real and worth knowing: while joined to the robot, name
+# resolution goes to the robot, and the client will report no internet. It has
+# none -- see ONE RADIO below -- so this mostly makes an existing fact visible.
+# `--no-portal` sets the hotspot up without it.
 #
 # DEPLOYING STILL WORKS
 # Join the robot's network from your laptop and deploy over it:
@@ -53,6 +65,37 @@ require_root() {
   [ "$(id -u)" -eq 0 ] || { echo "Needs root. Try: sudo $0 $*" >&2; exit 1; }
 }
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DNSMASQ_CONF=/etc/NetworkManager/dnsmasq-shared.d/pipepatrol.conf
+PORTAL_UNIT=pipepatrol-portal.service
+
+# Point every name at the robot, and put the console on port 80. Together these
+# are what makes joining the network enough on its own; see the header.
+enable_portal() {
+  # NetworkManager runs its own dnsmasq for a `shared` connection and reads this
+  # directory into it. Editing dnsmasq's main config instead would be ignored,
+  # because that is a different dnsmasq that is not running.
+  mkdir -p "$(dirname "$DNSMASQ_CONF")"
+  cat > "$DNSMASQ_CONF" <<EOF
+# Written by hotspot.sh. Every name resolves to the robot, so a client's
+# connectivity check lands on the console and the console opens by itself.
+address=/#/$ADDRESS
+EOF
+
+  sed "s|/home/pipepatrol/PipeOS|$(dirname "$(dirname "$HERE")")|g" \
+    "$HERE/$PORTAL_UNIT" > "/etc/systemd/system/$PORTAL_UNIT"
+  chmod 644 "/etc/systemd/system/$PORTAL_UNIT"
+  systemctl daemon-reload
+  systemctl enable --now "$PORTAL_UNIT"
+}
+
+disable_portal() {
+  rm -f "$DNSMASQ_CONF"
+  systemctl disable --now "$PORTAL_UNIT" 2>/dev/null || true
+  rm -f "/etc/systemd/system/$PORTAL_UNIT"
+  systemctl daemon-reload
+}
+
 case "${1:-status}" in
   status)
     if nmcli -t -f NAME con show | grep -qx "$CONNECTION"; then
@@ -64,6 +107,12 @@ case "${1:-status}" in
     fi
     echo -n "active on $IFACE: "
     nmcli -t -f GENERAL.CONNECTION dev show "$IFACE" 2>/dev/null | cut -d: -f2- || echo "unknown"
+    echo -n "console on port 80: "
+    if [ -f "$DNSMASQ_CONF" ] && systemctl is-enabled --quiet "$PORTAL_UNIT" 2>/dev/null; then
+      echo "yes -- joining opens it"
+    else
+      echo "no -- console is at :8000"
+    fi
     ;;
 
   enable)
@@ -71,10 +120,12 @@ case "${1:-status}" in
     require_root enable "$@"
     ssid="$SSID_DEFAULT"
     password="$PASSWORD_DEFAULT"
+    portal=1
     while [ $# -gt 0 ]; do
       case "$1" in
         --ssid) ssid="${2:-}"; shift 2 ;;
         --password) password="${2:-}"; shift 2 ;;
+        --no-portal) portal=0; shift ;;
         *) echo "unknown option: $1" >&2; exit 1 ;;
       esac
     done
@@ -102,12 +153,25 @@ case "${1:-status}" in
       connection.autoconnect yes \
       connection.autoconnect-priority 100
 
+    # The portal before the connection comes up: dnsmasq is started as part of
+    # bringing a shared connection up and reads its config once, so writing the
+    # file afterwards would not take effect until something restarted it.
+    if [ "$portal" -eq 1 ]; then
+      enable_portal
+    else
+      disable_portal
+    fi
+
     nmcli con up "$CONNECTION" >/dev/null
     echo "Hotspot is up and will come back on its own at every boot."
     echo
     echo "    network:  $ssid"
     echo "    password: $password"
-    echo "    console:  http://$ADDRESS:8000"
+    if [ "$portal" -eq 1 ]; then
+      echo "    console:  opens on joining, or http://$ADDRESS"
+    else
+      echo "    console:  http://$ADDRESS:8000"
+    fi
     echo
     echo "Deploy over it with:  ./deploy.sh pipepatrol@$ADDRESS"
     ;;
@@ -116,6 +180,10 @@ case "${1:-status}" in
     require_root disable
     nmcli con down "$CONNECTION" >/dev/null 2>&1 || true
     nmcli con delete "$CONNECTION" >/dev/null 2>&1 || true
+    # The wildcard DNS goes too. Left behind on a Pi that has rejoined a real
+    # network it would be inert -- it only applies to a shared connection -- but
+    # "inert" is a thing to have to work out at 2am.
+    disable_portal
     echo "Hotspot removed. The Pi will rejoin whatever WiFi it knows about."
     ;;
 

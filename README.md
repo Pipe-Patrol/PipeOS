@@ -134,14 +134,19 @@ This is a prototype's rule, and it is optional — see below.
 
 ## 4. Optional: make it an appliance
 
-Three one-time changes turn the robot into something you power on, connect to,
-and use, with no SSH and no shutdown ritual — and that survives having its plug
-pulled. See **[docs/APPLIANCE.md](docs/APPLIANCE.md)**.
+One command turns the robot into something you power on, join, and use — no
+SSH, no shutdown ritual, and it survives having its plug pulled. Fit a USB
+stick first; that is where recordings go.
 
 ```bash
-sudo ~/PipeOS/server/deploy/hotspot.sh enable        # robot hosts its own WiFi
-sudo ~/PipeOS/server/deploy/readonly-root.sh enable --data-device /dev/sda1
+./deploy.sh --appliance
 ```
+
+Then: switch on, join the `PipePatrol` network, and the console opens by
+itself. Switch off when you are done. Deploying afterwards is still just
+`./deploy.sh` — it takes the card lock off and puts it back for you.
+
+See **[docs/APPLIANCE.md](docs/APPLIANCE.md)**.
 
 ---
 
