@@ -16,9 +16,6 @@ web/dist/
 # Runtime data — runs, snapshots, and recordings live here on the Pi
 server/data/
 
-# Local-only temporary testing (in-browser robot simulator). Private.
-temptest/
-
 # Generated reports. Regenerate with the script that made them, don't commit
 # the output -- a checked-in copy audit is wrong the moment anyone edits a word.
 audit/
@@ -41,6 +38,12 @@ server/model/*.onnx
 # is what makes a fresh clone deployable — clone, ./deploy.sh, and the Pi
 # detects defects, with no checkpoint to find and no export to run.
 !server/model/pipe-defects-lite.onnx
+
+# Torch checkpoints and anomaly banks, dropped in by hand on whatever laptop is
+# serving the model. Bigger than the graph above and just as much a build
+# artefact — installing one is copying a file, not committing it.
+server/model/*.pth
+server/model/*.npz
 
 # Agent worktrees and session state — local scratch, never part of the repo.
 .claude/
