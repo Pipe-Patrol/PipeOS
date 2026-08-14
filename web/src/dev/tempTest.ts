@@ -55,11 +55,14 @@ export async function activateTestMode(): Promise<void> {
   try {
     mod = (await import(/* @vite-ignore */ __TEMPTEST_URL__)) as TempTestModule
   } catch (error) {
-    console.warn('[temptest] could not load the simulator', error)
-    throw new Error(
-      'Test mode needs the temptest/ folder — it is missing from this checkout',
-      { cause: error },
-    )
+    // The URL goes in the message, not just the console. "It says the folder is
+    // missing" is unactionable when the folder is plainly there; the path it
+    // actually asked for is the thing that tells you whether the checkout is
+    // short a folder or the dev server would not serve it.
+    console.warn('[temptest] could not load the simulator from', __TEMPTEST_URL__, error)
+    throw new Error(`Test mode could not load the simulator from ${__TEMPTEST_URL__}`, {
+      cause: error,
+    })
   }
   mod.activate()
 }

@@ -22,6 +22,11 @@ const temptestSim = fileURLToPath(new URL('../temptest/sim.ts', import.meta.url)
 const modelLab = fileURLToPath(new URL('../temptest/model-lab.html', import.meta.url))
 const sampleFrame = fileURLToPath(new URL('../temptest/sample-pipe.jpg', import.meta.url))
 
+/** A filesystem path as Vite's /@fs prefix wants it, on any OS. */
+function fsUrl(path: string): string {
+  return `/@fs/${path.replace(/\\/g, '/').replace(/^\/+/, '')}`
+}
+
 /**
  * The simulator shims fetch and WebSocket, but images are <img> loads the fetch
  * shim can't cover: the live camera (/api/camera) and each snapshot
@@ -81,7 +86,13 @@ export default defineConfig({
   },
   // Injected into the dev-only loader. In production this is dead code the build
   // strips, so the simulator never reaches the Pi.
-  define: { __TEMPTEST_URL__: JSON.stringify(`/@fs${temptestSim}`) },
+  //
+  // Built with a URL, not string concatenation. `/@fs` wants a POSIX path with
+  // one leading slash; fileURLToPath gives `C:\Users\...` on Windows, and
+  // pasting that on the end produced `/@fsC:\Users\...`, which 404s. The
+  // console then reported the folder as missing on a checkout that had it,
+  // which is a long way from the truth.
+  define: { __TEMPTEST_URL__: JSON.stringify(fsUrl(temptestSim)) },
   server: {
     // Let the dev server serve ../temptest, which sits outside web/.
     fs: { allow: ['..'] },
