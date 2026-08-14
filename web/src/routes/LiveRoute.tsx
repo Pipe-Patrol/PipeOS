@@ -40,7 +40,11 @@ import { useAutoFlag } from '@/robot/useAutoFlag'
 import { describeSpike, useClimateSpikes } from '@/robot/useClimateSpikes'
 import { useLiveTrail } from '@/robot/useLiveTrail'
 import { useRun } from '@/robot/useRun'
+import { useStableDetections } from '@/robot/useStableDetections'
 import type { DefectRegion, Detection, Run } from '@/robot/types'
+
+// One array, so a render with no telemetry does not look like a new frame.
+const NO_DETECTIONS: Detection[] = []
 
 /**
  * How far one press of the d-pad moves the zoom.
@@ -179,7 +183,12 @@ export function LiveRoute() {
   // key act on exactly what the operator can see. A class muted in settings is
   // one the console has been told not to raise, and raising it silently would
   // be worse than not drawing it.
-  const visibleDetections = (telemetry?.detections ?? []).filter(
+  // Held and merged before filtering: the raw stream drops a borderline box for
+  // a frame and finds it again on the next, which flickers it on and off faster
+  // than it can be read. See useStableDetections.
+  const steadyDetections = useStableDetections(telemetry?.detections ?? NO_DETECTIONS)
+
+  const visibleDetections = steadyDetections.filter(
     (detection) =>
       detection.confidence >= prefs.detectionThreshold &&
       !prefs.mutedClasses.includes(detectionClassOf(detection.label)?.name ?? ''),
@@ -473,31 +482,6 @@ export function LiveRoute() {
   }, [spike, autoMode, spikes])
 
   useEffect(() => () => clearNotice('climate-spike'), [])
-
-  /**
-   * Something in the way.
-   *
-   * The model has an `obstruction` class, so this is the model's own answer
-   * rather than a second estimator inferring one — and it goes to the notice
-   * bar with everything else rather than becoming a special case on the glass.
-   */
-  const obstruction = visibleDetections.find(
-    (detection) => detectionClassOf(detection.label)?.name === 'obstruction',
-  )
-  useEffect(() => {
-    if (!obstruction) {
-      clearNotice('obstruction')
-      return
-    }
-    raiseNotice(
-      'obstruction',
-      'warning',
-      `Obstruction ahead — ${Math.round(obstruction.confidence * 100)}% confident`,
-      autoMode ? undefined : { label: 'Flag it', run: () => flagDetection(obstruction) },
-    )
-  }, [obstruction, autoMode, flagDetection])
-
-  useEffect(() => () => clearNotice('obstruction'), [])
 
   /**
    * Enter files the box the model is most sure about.
