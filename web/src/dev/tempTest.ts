@@ -1,15 +1,22 @@
-import { useEffect } from 'react'
-
 /**
- * The whole footprint of temporary testing inside the app: a key listener.
+ * The whole footprint of temporary testing inside the app: two words.
  *
- * Everything it does lives in /temptest, loaded on demand. Delete that folder
- * and the import below fails; the shortcut becomes a silent no-op and nothing
- * else changes. This never ships to the Pi — it is gated to the Vite dev server
- * (import.meta.env.DEV and port 5173), and the production build drops it.
+ * Type `test` as both the device name and the address on the connect screen and
+ * Continue boots an in-browser simulated robot instead of looking for a real
+ * one. Everything it does lives in /temptest, loaded on demand. Delete that
+ * folder and the import below fails; Continue reports it and nothing else
+ * changes.
+ *
+ * WHY NOT A KEY GESTURE. This used to be a double-tap of T, gated to
+ * `import.meta.env.DEV && port === 5173`. Both halves failed quietly on anyone
+ * else's laptop -- Vite picks 5174 when 5173 is busy, and the gesture then did
+ * nothing at all, with no way to tell that from a broken build. A field you
+ * type into is discoverable, tells you when it has not worked, and cannot be
+ * silently disabled by a port number.
  *
  * `__TEMPTEST_URL__` is injected by web/vite.config.ts and points at the
- * dev-served simulator module.
+ * dev-served simulator module. In a production build it is dead code the build
+ * strips, so the simulator never reaches the Pi.
  */
 declare const __TEMPTEST_URL__: string
 
@@ -17,55 +24,42 @@ interface TempTestModule {
   activate: () => void
 }
 
-const ENABLED = import.meta.env.DEV && window.location.port === '5173'
+/** Typed into both fields. Compared case-insensitively and trimmed. */
+const TEST_WORD = 'test'
 
-/** Two T presses within this window count as the activation gesture. */
-const DOUBLE_TAP_MS = 500
+/**
+ * Dev server only. Not a second gate on top of the words -- the simulator is
+ * served over Vite's /@fs, so there is nothing to import in a build, and this
+ * only decides whether to say so or to try the address for real.
+ */
+export const TEST_MODE_AVAILABLE = import.meta.env.DEV
 
-/** Don't hijack a T typed into a text field. */
-function isTyping(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null
-  if (!el) return false
-  return el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)
+/** Does what the operator typed ask for the simulator? */
+export function wantsTestMode(name: string, address: string): boolean {
+  if (!TEST_MODE_AVAILABLE) return false
+  return (
+    name.trim().toLowerCase() === TEST_WORD && address.trim().toLowerCase() === TEST_WORD
+  )
 }
 
 /**
- * Press **T twice in a row** to boot the in-browser simulated robot, then run
- * `onReady` (which connects the console and navigates to the live screen).
+ * Boot the simulated robot. Resolves once it is answering, so the caller can
+ * connect straight after.
+ *
+ * Throws with a readable reason rather than returning false: the connect screen
+ * already has somewhere to put a failure, and "the temptest folder is missing"
+ * is exactly the sentence somebody who just cloned the repo needs.
  */
-export function useTempTest(onReady: () => void): void {
-  useEffect(() => {
-    if (!ENABLED) return
-
-    let lastT = 0
-
-    const onKey = async (event: KeyboardEvent) => {
-      if (event.repeat) return
-      if (event.ctrlKey || event.metaKey || event.altKey) return
-      if (event.code !== 'KeyT') return
-      if (isTyping(event.target)) return
-
-      const now = Date.now()
-      if (now - lastT >= DOUBLE_TAP_MS) {
-        lastT = now
-        return
-      }
-      lastT = 0
-
-      console.info('[temptest] double-T — booting the simulated robot')
-      try {
-        const mod = (await import(/* @vite-ignore */ __TEMPTEST_URL__)) as TempTestModule
-        mod.activate()
-        onReady()
-      } catch (error) {
-        console.warn(
-          '[temptest] not installed — the temptest/ folder is missing or was deleted',
-          error,
-        )
-      }
-    }
-
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onReady])
+export async function activateTestMode(): Promise<void> {
+  let mod: TempTestModule
+  try {
+    mod = (await import(/* @vite-ignore */ __TEMPTEST_URL__)) as TempTestModule
+  } catch (error) {
+    console.warn('[temptest] could not load the simulator', error)
+    throw new Error(
+      'Test mode needs the temptest/ folder — it is missing from this checkout',
+      { cause: error },
+    )
+  }
+  mod.activate()
 }
