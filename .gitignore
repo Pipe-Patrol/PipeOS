@@ -16,10 +16,6 @@ web/dist/
 # Runtime data — runs, snapshots, and recordings live here on the Pi
 server/data/
 
-# Generated reports. Regenerate with the script that made them, don't commit
-# the output -- a checked-in copy audit is wrong the moment anyone edits a word.
-audit/
-
 # Editors / OS
 .DS_Store
 .gstack/
